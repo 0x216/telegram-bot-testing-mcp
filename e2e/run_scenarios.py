@@ -160,6 +160,31 @@ async def main() -> None:
                                                  or "got your document" in m.get("text", "") for m in fresh)
             check("bot confirmed upload", ok, json.dumps(fresh)[:300])
 
+            print("== voice message via fake microphone")
+            tone = OUT / "tone.wav"
+            if not tone.exists():
+                import math
+                import struct as _struct
+                import wave
+
+                with wave.open(str(tone), "wb") as w:
+                    w.setnchannels(1)
+                    w.setsampwidth(2)
+                    w.setframerate(16000)
+                    frames = b"".join(
+                        _struct.pack("<h", int(12000 * math.sin(2 * math.pi * 440 * t / 16000)))
+                        for t in range(int(16000 * 2.0)))
+                    w.writeframes(frames)
+            voiced = parse(await s.call_tool("tg_send_voice", {"path": str(tone)}))
+            check("voice sent", "error" not in voiced and voiced.get("media") in ("voice", "audio"),
+                  json.dumps(voiced)[:250])
+            last = max(last, max_id(voiced))
+            fresh = parse(await s.call_tool("tg_wait_for_message",
+                                            {"timeout_s": 30, "after_id": last}))
+            ok = isinstance(fresh, list) and any("got your voice" in m.get("text", "") for m in fresh)
+            check("bot confirmed voice", ok, json.dumps(fresh)[:300])
+            last = max(last, max_id(fresh))
+
             print("== screenshot")
             shot = await s.call_tool("tg_screenshot", {"scope": "chat"})
             img = next((c for c in shot.content if getattr(c, "type", "") == "image"), None)

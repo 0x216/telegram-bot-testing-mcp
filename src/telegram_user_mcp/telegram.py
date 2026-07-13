@@ -5,7 +5,13 @@ import re
 
 from . import extract
 from . import selectors as sel
-from .errors import ButtonNotFound, ChatNotFound, SelectorBroken, WaitTimeout
+from .errors import (
+    AdapterError,
+    ButtonNotFound,
+    ChatNotFound,
+    SelectorBroken,
+    WaitTimeout,
+)
 from .session import BrowserSession
 
 _USERNAME_RE = re.compile(r"^(?:https?://)?(?:t\.me/)?@?([A-Za-z0-9_]{3,})/?$")
@@ -23,6 +29,7 @@ class TelegramOps:
 
     def __init__(self, session: BrowserSession):
         self.session = session
+        self._current_chat: str | None = None
 
     async def _ready(self):
         await self.session.ensure_started()
@@ -117,6 +124,7 @@ class TelegramOps:
         except Exception:
             raise SelectorBroken("message composer after opening the chat")
         await asyncio.sleep(1.0)  # let history render
+        self._current_chat = query
         msgs = await extract.read_messages(page, limit=5)
         return {"chat": username, "messages": [m.to_dict() for m in msgs]}
 
@@ -344,6 +352,48 @@ class TelegramOps:
                 return fresh[-1].to_dict()
             await asyncio.sleep(0.5)
         raise SelectorBroken("uploaded message bubble")
+
+    async def send_voice(self, path: str, duration_s: float | None = None) -> dict:
+        """Record a voice message through a fake microphone fed from a WAV file.
+
+        Requires a browser relaunch when the WAV changes, then re-opens the
+        current chat and drives the real record/send buttons.
+        """
+        import wave
+
+        page = await self._ready()
+        if duration_s is None:
+            try:
+                with wave.open(path, "rb") as w:
+                    duration_s = w.getnframes() / w.getframerate()
+            except Exception:
+                raise AdapterError(f"{path!r} is not a readable WAV file.",
+                                   hint="Voice capture needs PCM WAV input.")
+        if self.session.voice_capture_file != path:
+            if not self._current_chat:
+                raise AdapterError("Open a chat before sending a voice message.")
+            self.session.voice_capture_file = path
+            await self.session.start()  # relaunch with the fake-mic flags
+            await self.open_chat(self._current_chat)
+            page = self.session.page
+        before_max = max((m.id for m in await extract.read_messages(page, limit=10)),
+                         default=0)
+        record = page.locator(f"{sel.SEND_BUTTON}:visible").last
+        if not await record.count():
+            raise SelectorBroken("record (mic) button")
+        await record.click()  # composer is empty -> starts recording
+        await asyncio.sleep(min(duration_s + 0.7, 55))
+        await page.locator(f"{sel.SEND_BUTTON}:visible").last.click()  # send
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + 15
+        while loop.time() < deadline:
+            msgs = await extract.read_messages(page, limit=5)
+            mine = [m for m in msgs if m.out and m.id > before_max
+                    and m.media in ("voice", "audio")]
+            if mine:
+                return mine[-1].to_dict()
+            await asyncio.sleep(0.5)
+        raise SelectorBroken("sent voice bubble (recording may have failed)")
 
     async def clear_chat(self) -> dict:
         # WebK's topbar menu offers "Delete" which opens PopupPeer with

@@ -99,6 +99,12 @@ def build_server(config: Config | None = None) -> FastMCP:
         return await _run(ops().send_file(path, caption or None, kind))
 
     @mcp.tool()
+    async def tg_send_voice(path: str, duration_s: float = 0) -> str:
+        """Record and send a voice message using a fake microphone fed from a
+        WAV file (PCM). Relaunches the browser on first use per file."""
+        return await _run(ops().send_voice(path, duration_s or None))
+
+    @mcp.tool()
     async def tg_read_messages(limit: int = 20) -> str:
         """Read the last messages of the open chat as structured JSON
         (id, direction, text, time, button grid, media kind)."""

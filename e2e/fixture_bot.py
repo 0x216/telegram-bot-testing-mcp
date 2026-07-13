@@ -96,6 +96,9 @@ def handle_message(msg: dict):
              files={"photo": ("tiny.png", tiny_png(), "image/png")})
     elif text:
         call("sendMessage", chat_id=chat_id, text=f"echo: {text}")
+    elif msg.get("voice"):
+        call("sendMessage", chat_id=chat_id,
+             text=f"got your voice ({msg['voice'].get('duration', '?')}s)")
     elif msg.get("photo") or msg.get("document"):
         kind = "photo" if msg.get("photo") else "document"
         call("sendMessage", chat_id=chat_id, text=f"got your {kind}")

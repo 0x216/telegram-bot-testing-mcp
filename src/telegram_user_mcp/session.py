@@ -17,6 +17,9 @@ class BrowserSession:
         self._pw = None
         self._ctx: BrowserContext | None = None
         self._page: Page | None = None
+        # when set, Chromium is launched with a fake microphone fed from this
+        # WAV file (voice-message testing); changing it requires a relaunch
+        self.voice_capture_file: str | None = None
 
     @property
     def page(self) -> Page:
@@ -33,10 +36,19 @@ class BrowserSession:
         headed = self.config.headed if headed is None else headed
         self.config.profile_dir.mkdir(parents=True, exist_ok=True)
         self._pw = await async_playwright().start()
+        args = []
+        if self.voice_capture_file:
+            args += [
+                "--use-fake-device-for-media-stream",
+                "--use-fake-ui-for-media-stream",
+                f"--use-file-for-fake-audio-capture={self.voice_capture_file}%noloop",
+            ]
         self._ctx = await self._pw.chromium.launch_persistent_context(
             str(self.config.profile_dir),
             headless=not headed,
             viewport={"width": 1280, "height": 900},
+            args=args,
+            permissions=["microphone"] if self.voice_capture_file else [],
         )
         self._page = self._ctx.pages[0] if self._ctx.pages else await self._ctx.new_page()
         await self._page.goto(self.config.base_url, wait_until="domcontentloaded")
