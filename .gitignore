@@ -7,3 +7,4 @@ dist/
 profile-*/
 .playwright/
 spike/out/
+e2e/out/

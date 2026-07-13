@@ -15,6 +15,8 @@ component classes only.
 LOGGED_IN_MARKER = "#page-chats"
 AUTH_PAGES = "#auth-pages"
 CHATLIST_ITEM = "a.chatlist-chat"            # [src] appDialogsManager.ts:335, data-peer-id
+SEARCH_INPUT = ".input-search input"         # [live] left-column search field
+SEARCH_RESULT_ROW = ".search-group a[data-peer-id]"  # [live] global search rows (a.row)
 
 # --- login flow ----------------------------------------------------------------
 LOGIN_PHONE_BUTTON_TEXT = "Log in by phone Number"       # [live] QR page button
@@ -50,6 +52,7 @@ MEDIA_KIND_SELECTORS = [
 
 # --- composing / sending ----------------------------------------------------------
 MESSAGE_INPUT = ".input-message-input"       # [src] input.ts:2913, contenteditable
+START_CONTROL = ".chat-input-control"        # [live] START overlay on un-started bot chats
 SEND_BUTTON = "button.btn-send"              # [src] input.ts:1305
 ATTACH_BUTTON = ".attach-file"               # [src] input.ts:1256
 FILE_INPUT = "input[type=file]"              # [src] input.ts:1268 (hidden, multiple)
