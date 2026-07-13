@@ -94,6 +94,14 @@ def handle_message(msg: dict):
     elif text == "/photo":
         call("sendPhoto", chat_id=chat_id, caption="a tiny photo",
              files={"photo": ("tiny.png", tiny_png(), "image/png")})
+    elif text == "/app":
+        call("sendMessage", chat_id=chat_id, text="try the mini app:",
+             reply_markup={"inline_keyboard": [[{
+                 "text": "Open App",
+                 "web_app": {"url": os.environ.get(
+                     "MINIAPP_URL",
+                     "https://0x216.github.io/telegram-bot-testing-mcp/miniapp/")},
+             }]]})
     elif text:
         call("sendMessage", chat_id=chat_id, text=f"echo: {text}")
     elif msg.get("voice"):

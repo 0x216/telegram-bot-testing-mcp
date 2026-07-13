@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TGMCP Fixture Mini App</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 24px; background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #111); }
+  input, button { font-size: 16px; padding: 8px 12px; margin: 4px 0; }
+  #out { margin-top: 12px; font-weight: 600; min-height: 24px; }
+</style>
+</head>
+<body>
+  <h1>TGMCP Fixture Mini App</h1>
+  <label for="name">Your name</label><br>
+  <input id="name" placeholder="type a name">
+  <br>
+  <button id="greet" onclick="document.getElementById('out').textContent = 'Hello, ' + (document.getElementById('name').value || 'stranger') + '!'">Greet</button>
+  <button id="closeapp" onclick="window.Telegram && Telegram.WebApp.close()">Close app</button>
+  <div id="out"></div>
+  <script>window.Telegram && Telegram.WebApp.ready();</script>
+</body>
+</html>
