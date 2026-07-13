@@ -68,7 +68,9 @@ DELETE_POPUP = ".popup-delete-chat"          # [src] deleteDialog.ts:234
 POPUP_DANGER_BUTTON = ".popup-button.btn.danger"  # [src] popups/index.ts:263
 
 # --- mini apps -------------------------------------------------------------------------
-WEBAPP_POPUP = ".popup-web-app"              # [src] popups/webApp.ts:8
-WEBAPP_IFRAME = ".popup-web-app iframe"      # [src] telegramWebView.ts:32 in web-app-body
-WEBAPP_CLOSE = ".popup-web-app button.btn-icon.popup-close"  # [src] popups/index.ts:156
-WEBAPP_MAIN_BUTTON = ".web-app-footer .web-app-button"       # [src] webApp.tsx:250
+# Deployed WebK opens web apps in a movable "Browser" window with CSS-module
+# (hashed) classes; only these anchors are stable. [live 2026-07]
+WEBAPP_WINDOW = ".movable-element"
+WEBAPP_IFRAME = 'iframe[src*="tgWebAppData"], .web-app-body iframe'
+WEBAPP_HEADER_BUTTONS = ".movable-element .btn-icon:visible"
+WEBAPP_MAIN_BUTTON = ".web-app-button"       # [src] webApp.tsx:250

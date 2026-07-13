@@ -60,6 +60,8 @@ and reports what passed, what failed, and how it looked.
 |------|---------|
 | `tg_status` | Mode, login state, profile location |
 | `tg_login` | One-time interactive login (QR window) |
+| `tg_login_phone` / `tg_login_code` / `tg_login_password` | Headless login by phone number — the code arrives on the account's other devices |
+| `tg_send_voice` | Record & send a real voice message through a fake microphone (WAV input) |
 | `tg_open_chat` | Open chat by `@username` / t.me link |
 | `tg_send_message` | Send text or /command |
 | `tg_send_file` | Attach & send photo/document (with caption) |
@@ -96,11 +98,20 @@ Telegram itself.
 
 ## Headless servers (CI boxes, VPS)
 
-Everything except `login` is headless by default. `login` opens a browser
-window, which needs a display — on a headless server it fails with
-"Looks like you launched a headed browser without having a XServer running".
-The recipe: log in once on any desktop machine, then move the profile —
-it is just a directory and transfers fine across OSes (verified Windows → Linux):
+Everything is headless by default, including login:
+
+```bash
+telegram-bot-testing-mcp login --phone +42077xxxxxxx
+# the confirmation code arrives in the Telegram app on the account's
+# other devices (or via SMS) — type it into the terminal prompt
+```
+
+Agents can do the same via `tg_login_phone` → `tg_login_code`
+(→ `tg_login_password` for 2FA accounts).
+
+Alternatively, log in once on a desktop machine (`login` opens a QR window)
+and move the profile — it is just a directory and transfers fine across OSes
+(verified Windows → Linux):
 
 ```bash
 tar -czf tg-profile.tgz -C ~/.telegram-user-mcp profile-prod
@@ -133,7 +144,6 @@ For most workflows the default `prod` mode with a dedicated account is simpler.
 
 ## Limitations (v1)
 
-- Voice-message *recording* is not supported (audio files send fine as attachments).
 - Designed for 1:1 bot chats; groups/channels are untested.
 - One server instance per profile (Chromium locks the profile directory).
 - Telegram Web markup changes can break selectors — they live in one file

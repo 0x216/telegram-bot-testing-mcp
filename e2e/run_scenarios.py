@@ -185,6 +185,42 @@ async def main() -> None:
             check("bot confirmed voice", ok, json.dumps(fresh)[:300])
             last = max(last, max_id(fresh))
 
+            print("== mini app")
+            import re as _re
+            sent = parse(await s.call_tool("tg_send_message", {"text": "/app"}))
+            last = max(last, max_id(sent))
+            fresh = parse(await s.call_tool("tg_wait_for_message",
+                                            {"timeout_s": 30, "after_id": last}))
+            last = max(last, max_id(fresh))
+            opened = parse(await s.call_tool("tg_miniapp_open", {"button_text": "Open App"}))
+            check("mini app opened", opened.get("status") in ("open", "already_open"),
+                  json.dumps(opened)[:200])
+            snap_res = await s.call_tool("tg_miniapp_snapshot", {})
+            snap = snap_res.content[0].text
+            check("snapshot lists elements", "[e" in snap, snap[:150])
+            name_ref = next((m.group(1) for m in
+                             _re.finditer(r"\[(e\d+)\] input", snap)), None)
+            greet_ref = next((m.group(1) for m in
+                              _re.finditer(r'\[(e\d+)\] button "Greet"', snap)), None)
+            check("input and Greet button found", bool(name_ref and greet_ref),
+                  snap[:200])
+            if name_ref and greet_ref:
+                parse(await s.call_tool("tg_miniapp_type",
+                                        {"ref": name_ref, "text": "Claude"}))
+                parse(await s.call_tool("tg_miniapp_click", {"ref": greet_ref}))
+                snap2 = (await s.call_tool("tg_miniapp_snapshot", {})).content[0].text
+                check("mini app reacted (Hello, Claude!)", "Hello, Claude!" in snap2,
+                      snap2[:200])
+                appshot = await s.call_tool("tg_miniapp_screenshot", {})
+                img = next((c for c in appshot.content
+                            if getattr(c, "type", "") == "image"), None)
+                check("mini app screenshot", img is not None)
+                if img:
+                    (OUT / "miniapp.png").write_bytes(base64.b64decode(img.data))
+                closed = parse(await s.call_tool("tg_miniapp_close", {}))
+                check("mini app closed", closed.get("status") == "closed",
+                      json.dumps(closed)[:150])
+
             print("== screenshot")
             shot = await s.call_tool("tg_screenshot", {"scope": "chat"})
             img = next((c for c in shot.content if getattr(c, "type", "") == "image"), None)

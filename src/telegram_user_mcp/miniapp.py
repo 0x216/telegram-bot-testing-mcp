@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 from . import selectors as sel
 from .errors import MiniAppNotOpen, SelectorBroken
@@ -11,7 +12,7 @@ SNAPSHOT_JS = """
   let n = 0;
   const lines = [];
   const interesting = document.querySelectorAll(
-    'a, button, input, textarea, select, [role], [onclick], h1, h2, h3, label, [data-tgmcp-ref]');
+    'a, button, input, textarea, select, [role], [onclick], h1, h2, h3, label, [id], [data-tgmcp-ref]');
   for (const el of interesting) {
     if (n >= max) break;
     const r = el.getBoundingClientRect();
@@ -63,6 +64,13 @@ class MiniAppOps:
                 await ops.click_button(row=0, col=0)
         except Exception:
             pass  # the button may open the app anyway; verify by iframe below
+        # first open of a bot's web app may ask for confirmation
+        confirm = page.locator(".popup:visible .popup-button, .popup:visible button",
+                               has_text=re.compile(r"^(open|launch|confirm)", re.I))
+        try:
+            await confirm.first.click(timeout=4_000)
+        except Exception:
+            pass
         try:
             await page.wait_for_selector(sel.WEBAPP_IFRAME, state="attached", timeout=15_000)
         except Exception:
@@ -99,12 +107,22 @@ class MiniAppOps:
 
     async def close(self) -> dict:
         page = self.session.page
-        btn = page.locator(sel.WEBAPP_CLOSE)
-        if await btn.count():
-            await btn.first.click()
+
+        async def gone() -> bool:
             try:
-                await page.wait_for_selector(sel.WEBAPP_IFRAME, state="detached", timeout=5_000)
+                await page.wait_for_selector(sel.WEBAPP_IFRAME, state="detached",
+                                             timeout=4_000)
+                return True
             except Exception:
-                pass
-        return {"status": "closed" if not await page.locator(sel.WEBAPP_IFRAME).count()
-                else "still_open"}
+                return await page.locator(sel.WEBAPP_IFRAME).count() == 0
+
+        await page.keyboard.press("Escape")
+        if await gone():
+            return {"status": "closed"}
+        # fall back to the Browser-window header icons (close is among them)
+        buttons = page.locator(sel.WEBAPP_HEADER_BUTTONS)
+        for i in range(min(await buttons.count(), 4)):
+            await buttons.nth(i).click()
+            if await gone():
+                return {"status": "closed"}
+        return {"status": "still_open"}
