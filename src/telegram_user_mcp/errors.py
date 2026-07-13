@@ -45,8 +45,8 @@ class ButtonNotFound(AdapterError):
 class WaitTimeout(AdapterError):
     code = "timeout"
 
-    def __init__(self, seconds: float):
-        super().__init__(f"No new message from the bot within {seconds:g}s.",
+    def __init__(self, seconds: float, what: str = "a new message from the bot"):
+        super().__init__(f"Timed out waiting for {what} ({seconds:g}s).",
                          hint="The bot may be slow or not running; check tg_read_messages for current state.")
 
 

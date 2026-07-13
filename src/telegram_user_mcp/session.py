@@ -76,4 +76,4 @@ class BrowserSession:
                 return {"status": "logged_in"}
             await asyncio.sleep(2)
         await self.start()
-        raise WaitTimeout(timeout_s)
+        raise WaitTimeout(timeout_s, what="login (QR was not scanned in time)")
