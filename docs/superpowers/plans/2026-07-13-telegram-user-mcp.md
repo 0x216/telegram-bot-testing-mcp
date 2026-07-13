@@ -1001,6 +1001,7 @@ def main() -> None:
 - Create: `README.md`; Modify: `pyproject.toml` (classifiers, urls), `LICENSE` (MIT).
 
 - [ ] **Step 1:** README (EN): what/why, quickstart (`uvx telegram-user-mcp`, `claude mcp add telegram -- uvx telegram-user-mcp`, one-time `login`), tool table, modes (prod default; test-DC reality + tdlib/td#3370 link), security note (profile = account key; dedicated account recommended), limitations (no voice recording, 1:1 bot chats), troubleshooting (`selector_broken` → issue template).
+  README must include a **Test-DC runbook** section: (1) deterministic 99966 test accounts are disabled by Telegram; (2) register a test-DC account with a REAL phone number via official iOS app — tap Settings icon 10×, Accounts → Login to another account → Test; (3) log the adapter in with `TG_MCP_MODE=test telegram-user-mcp login` (QR scannable by the test-mode iOS app); (4) create the bot under test by messaging @BotFather *inside the test DC* from that account; (5) run the bot's code against `https://api.telegram.org/bot<token>/test/` (the bot is a token, not a phone number — the same single test account can both create the bot and act as the test user).
 - [ ] **Step 2:** `uv build` succeeds; `uvx --from dist/telegram_user_mcp-0.1.0-py3-none-any.whl telegram-user-mcp status` works.
 - [ ] **Step 3:** Commit — `git commit -m "docs: README and packaging polish"`. (Actual PyPI publish: user decision.)
 
