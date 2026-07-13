@@ -19,7 +19,7 @@ media, Mini Apps — "everything a user can do".
 | Engine | Real browser driving web.telegram.org via Playwright | Official client → the bot sees a real user; DOM gives reliable structured reads + pixel screenshots |
 | Language | Python + Playwright | User preference; MCP Python SDK (FastMCP) |
 | Architecture | Semantic Telegram tools + generic escape-hatch tools for Mini Apps (option C) | 95% of work cheap/reliable via semantic tools; Mini Apps are arbitrary web apps and need generic iframe interaction |
-| Environments | Both Telegram **test DC** and **production**, default = `test` | Test DC: accounts auto-created from `99966XYYYY` numbers (code = X×5), zero-touch login, zero risk, CI-able. Prod: for live bots, one-time QR login with (recommended) dedicated account |
+| Environments | Both Telegram **test DC** and **production**, default = `prod` | **Spike finding (2026-07-13):** deterministic test accounts (`99966XYYYY`, code X×N) are **disabled by Telegram** since ~Oct 2024 (confirmed empirically on DC2/DC3 via WebK and direct MTProto probe; authoritative: TDLib maintainer in tdlib/td#3370 — "Test accounts are disabled currently", registration only via official iOS app with a real number). Zero-touch test login is therefore impossible → default flips to `prod` with a dedicated account (one-time QR login, persistent profile). `test` mode is kept for users who already own a test-DC account; WebK supports it via `?test=1` (verified: connects to `apiws_test`) |
 | Desktop client | Not in v1 | No automation API / accessibility tree in tdesktop; bot cannot distinguish clients anyway; possible later as a screenshot-only visual mode |
 
 ## Architecture
@@ -42,13 +42,18 @@ Claude Code ◄─stdio─► MCP server (Python, mcp SDK / FastMCP)
   profile per mode (`profile-test/`, `profile-prod/`). Session survives restarts.
 - **Headless by default**; `--headed` flag to watch. Any tool can return screenshots.
 - **Login:**
-  - `test` mode: fully automatic — generate `99966XYYYY` number, submit code `XXXXX`,
-    account is created by Telegram's test DC. Disposable accounts, no SIM.
-  - `prod` mode: `tg_login` / CLI `login` opens a headed window with the QR code;
-    user scans once; session persists in the profile.
-- **Client choice (WebK vs WebA)** and the exact test-DC switching mechanism
-  (URL param / localStorage / debug menu) are resolved by a hands-on spike before
-  implementation; result recorded here.
+  - `prod` mode (default): `tg_login` / CLI `login` opens a headed window with the
+    QR code; user scans once with a (recommended dedicated) account; session
+    persists in the profile.
+  - `test` mode: same QR/code login against WebK `?test=1`, but requires an
+    already-registered test-DC account (Telegram disabled public test-account
+    creation — see tdlib/td#3370). Documented honestly in README.
+- **Client choice: WebK (`/k`)** — resolved by spike. WebA's test mode is
+  build-time only (`APP_ENV === 'test'`), while WebK switches at runtime via
+  `?test=1` and propagates it into the MTProto worker (verified in source:
+  `apiManagerProxy` sets `url.searchParams.set('test','1')`; endpoint suffix
+  `apiws_test`). Login flow automation verified hands-on: phone form and 5-cell
+  code input are scriptable.
 - **Security:** the profile dir is an account key. Created with user-only permissions;
   README warns and recommends a dedicated account for prod mode.
 
@@ -91,12 +96,12 @@ Every tool returns typed errors with actionable hints:
 
 - **Unit:** message/keyboard extraction against saved HTML fixtures of the chosen
   web client; selector table sanity.
-- **E2E (the main proof):** against the real test DC — auto-created account talks to
-  our own **fixture bot** (small Python bot using Bot API `/test/` endpoint via plain
-  HTTP long-polling — bot side legitimately uses Bot API; the *user* side is the
-  browser). Fixture bot echoes text, serves inline/reply keyboards, sends media,
-  edits messages on callback. E2E runs locally; CI runs lint + unit (test DC is
-  too flaky for required CI).
+- **E2E (the main proof):** a real (dedicated) account on prod talks to our own
+  **fixture bot** (small Python bot using plain Bot API HTTP long-polling — the
+  bot side legitimately uses Bot API; the *user* side is the browser). Fixture
+  bot echoes text, serves inline/reply keyboards, sends media, edits messages on
+  callback. Requires a one-time QR login by a human; afterwards the persistent
+  profile makes E2E repeatable. CI runs lint + unit only.
 - **Self-verification:** drive full scenarios through the MCP tools themselves
   (send /start → wait reply → click button → assert edit → screenshot).
 
