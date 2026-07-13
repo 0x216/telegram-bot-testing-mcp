@@ -94,7 +94,8 @@ class TelegramOps:
       const out = [];
       Array.from(bubble.querySelectorAll(args.rowSel)).forEach((row, ri) => {
         Array.from(row.querySelectorAll(args.btnSel)).forEach((btn, ci) => {
-          out.push({row: ri, col: ci, text: (btn.innerText || '').trim(),
+          const t = btn.querySelector(args.btnTextSel);
+          out.push({row: ri, col: ci, text: ((t ? t.innerText : btn.innerText) || '').trim(),
                     mid: Number(bubble.dataset.mid || 0)});
         });
       });
@@ -108,6 +109,7 @@ class TelegramOps:
         buttons = await page.evaluate(self._BUTTONS_JS, {
             "mid": message_id, "bubbleSel": sel.BUBBLE,
             "rowSel": sel.INLINE_ROW, "btnSel": sel.INLINE_BUTTON,
+            "btnTextSel": sel.INLINE_BUTTON_TEXT,
         })
         wanted = text if text is not None else f"({row},{col})"
         if not buttons:
@@ -177,20 +179,22 @@ class TelegramOps:
         raise SelectorBroken("uploaded message bubble")
 
     async def clear_chat(self) -> dict:
+        # WebK's topbar menu offers "Delete" which opens PopupPeer with
+        # clear/delete choices; for a 1:1 bot chat this wipes the history.
         page = await self._ready()
-        await page.locator(sel.TOPBAR_MENU_BUTTON).click()
-        item = page.locator(sel.MENU_ITEM, has_text=re.compile("clear", re.I))
+        await page.locator(sel.TOPBAR_MENU_BUTTON).last.click()
+        item = page.locator(sel.MENU_ITEM, has_text=re.compile("delete|clear", re.I))
         try:
             await item.first.click(timeout=5_000)
         except Exception:
             await page.keyboard.press("Escape")
-            raise SelectorBroken("'Clear messages' menu item")
-        confirm = page.locator(sel.POPUP_BUTTON, has_text=re.compile("clear|delete", re.I))
+            raise SelectorBroken("'Delete/Clear' menu item")
+        confirm = page.locator(f"{sel.DELETE_POPUP} {sel.POPUP_DANGER_BUTTON}")
         try:
             await confirm.first.click(timeout=5_000)
         except Exception:
             await page.keyboard.press("Escape")
-            raise SelectorBroken("clear-history confirmation button")
+            raise SelectorBroken("delete/clear confirmation button")
         await asyncio.sleep(1.0)
         return {"status": "cleared"}
 

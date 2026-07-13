@@ -40,10 +40,12 @@ class BrowserSession:
         )
         self._page = self._ctx.pages[0] if self._ctx.pages else await self._ctx.new_page()
         await self._page.goto(self.config.base_url, wait_until="domcontentloaded")
-        # Both #page-chats and #auth-pages are always in the DOM; visibility tells
-        # which state we're in, so wait until either becomes visible.
+        # Both #page-chats and #auth-pages are always in the DOM (page-chats can
+        # even appear twice); visibility tells which state we're in. `:visible`
+        # makes the comma-list match whichever becomes visible first.
         await self._page.wait_for_selector(
-            f"{sel.LOGGED_IN_MARKER}, {sel.AUTH_PAGES}", state="visible", timeout=60_000
+            f"{sel.LOGGED_IN_MARKER}:visible, {sel.AUTH_PAGES}:visible",
+            state="attached", timeout=60_000,
         )
 
     async def stop(self) -> None:
@@ -56,7 +58,7 @@ class BrowserSession:
 
     async def is_logged_in(self) -> bool:
         await self.ensure_started()
-        return await self.page.locator(sel.LOGGED_IN_MARKER).is_visible()
+        return await self.page.locator(f"{sel.LOGGED_IN_MARKER}:visible").count() > 0
 
     async def ensure_logged_in(self) -> None:
         if not await self.is_logged_in():
@@ -69,7 +71,7 @@ class BrowserSession:
         loop = asyncio.get_event_loop()
         deadline = loop.time() + timeout_s
         while loop.time() < deadline:
-            if await self.page.locator(sel.LOGGED_IN_MARKER).is_visible():
+            if await self.page.locator(f"{sel.LOGGED_IN_MARKER}:visible").count() > 0:
                 await self.start()  # relaunch in configured (headless) mode
                 return {"status": "logged_in"}
             await asyncio.sleep(2)

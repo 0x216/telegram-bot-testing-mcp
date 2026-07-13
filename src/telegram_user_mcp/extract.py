@@ -12,12 +12,20 @@ MESSAGES_JS = """
     const timeEl = b.querySelector(args.timeSel);
     const rows = [];
     for (const row of b.querySelectorAll(args.rowSel)) {
-      const btns = Array.from(row.querySelectorAll(args.btnSel)).map(x => (x.innerText || '').trim());
+      const btns = Array.from(row.querySelectorAll(args.btnSel)).map(x => {
+        const t = x.querySelector(args.btnTextSel);
+        return ((t ? t.innerText : x.innerText) || '').trim();
+      });
       if (btns.length) rows.push(btns);
     }
     let media = null;
-    for (const [cls, kind] of args.mediaClasses) {
-      if (b.querySelector(cls)) { media = kind; break; }
+    for (const [cls, kind] of args.mediaBubbleClasses) {
+      if (b.classList.contains(cls)) { media = kind; break; }
+    }
+    if (!media) {
+      for (const [q, kind] of args.mediaInnerSelectors) {
+        if (b.querySelector(q)) { media = kind; break; }
+      }
     }
     let text = '';
     if (textEl) {
@@ -75,7 +83,9 @@ def _js_args(limit: int) -> dict:
         "timeSel": sel.BUBBLE_TIME,
         "rowSel": sel.INLINE_ROW,
         "btnSel": sel.INLINE_BUTTON,
-        "mediaClasses": sel.MEDIA_KIND_SELECTORS,
+        "btnTextSel": sel.INLINE_BUTTON_TEXT,
+        "mediaBubbleClasses": sel.MEDIA_BUBBLE_CLASSES,
+        "mediaInnerSelectors": sel.MEDIA_KIND_SELECTORS,
         "limit": limit,
     }
 
