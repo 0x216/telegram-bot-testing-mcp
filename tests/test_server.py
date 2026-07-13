@@ -7,7 +7,8 @@ from telegram_user_mcp.config import Config
 from telegram_user_mcp.server import build_server
 
 EXPECTED_TOOLS = {
-    "tg_status", "tg_login", "tg_open_chat", "tg_send_message", "tg_send_file",
+    "tg_status", "tg_login", "tg_login_phone", "tg_login_code",
+    "tg_login_password", "tg_open_chat", "tg_send_message", "tg_send_file",
     "tg_read_messages", "tg_wait_for_message", "tg_click_button",
     "tg_click_reply_button", "tg_clear_chat", "tg_screenshot",
     "tg_miniapp_open", "tg_miniapp_snapshot", "tg_miniapp_click",

@@ -11,8 +11,13 @@ def main() -> None:
         description="MCP server that tests Telegram bots as a real user "
                     "(default: run the stdio server)")
     sub = parser.add_subparsers(dest="cmd")
-    login = sub.add_parser("login", help="open a browser window to log in once (QR/phone)")
+    login = sub.add_parser(
+        "login",
+        help="log in once: opens a QR window, or use --phone for headless "
+             "terminal login (code is prompted on stdin)")
     login.add_argument("--timeout", type=int, default=300)
+    login.add_argument("--phone", default=None,
+                       help="phone number for headless login, e.g. +42077...")
     sub.add_parser("status", help="print mode and login status")
     args = parser.parse_args()
 
@@ -20,10 +25,27 @@ def main() -> None:
         from .config import Config
         from .session import BrowserSession
 
+        async def run_phone(s: BrowserSession) -> None:
+            res = await s.login_phone_start(args.phone)
+            print(json.dumps(res), flush=True)
+            if res["status"] == "already_logged_in":
+                return
+            code = input("Enter the confirmation code "
+                         "(check your Telegram app or SMS): ")
+            res = await s.login_submit_code(code)
+            if res["status"] == "password_needed":
+                import getpass
+                res = await s.login_submit_password(
+                    getpass.getpass("Two-factor password: "))
+            print(json.dumps(res))
+
         async def run() -> None:
             s = BrowserSession(Config.from_env())
             try:
-                print(json.dumps(await s.login_interactive(args.timeout)))
+                if args.phone:
+                    await run_phone(s)
+                else:
+                    print(json.dumps(await s.login_interactive(args.timeout)))
             except Exception as e:
                 msg = str(e)
                 if "XServer" in msg or "Target page, context or browser has been closed" in msg:

@@ -34,10 +34,19 @@ class TelegramOps:
     # "@username" subtitles. Row innerText concatenates fields with no
     # separator, so match individual descendants' textContent. Prefer the
     # exact-@username hit; fall back to title==username + subtitle=="bot".
+    # In title mode (query with spaces — service chats like "Telegram
+    # Notifications") match the exact .peer-title instead.
     _FIND_ROW_JS = """
     (args) => {
       const rows = Array.from(document.querySelectorAll(args.rowSel));
       const uname = args.username.toLowerCase();
+      if (args.byTitle) {
+        for (let i = 0; i < rows.length; i++) {
+          const title = rows[i].querySelector('.peer-title');
+          if (title && (title.textContent || '').trim().toLowerCase() === uname) return i;
+        }
+        return -1;
+      }
       const want = '@' + uname;
       for (let i = 0; i < rows.length; i++) {
         for (const el of rows[i].querySelectorAll('*')) {
@@ -70,8 +79,11 @@ class TelegramOps:
     async def open_chat(self, query: str) -> dict:
         # Deep-link hash assignment is silently ignored by WebK at runtime, so
         # go the way a human does: left-column search, click the exact @username.
+        # Queries with spaces are treated as exact chat titles (service chats
+        # like "Telegram Notifications" have no username).
         page = await self._ready()
-        username = _to_username(query)
+        by_title = " " in query.strip()
+        username = query.strip() if by_title else _to_username(query)
         loop = asyncio.get_event_loop()
         idx = -1
         # Global username resolution can be slow (especially on the test DC),
@@ -89,6 +101,7 @@ class TelegramOps:
             while loop.time() < deadline:
                 idx = await page.evaluate(self._FIND_ROW_JS, {
                     "rowSel": sel.SEARCH_RESULT_ROW, "username": username,
+                    "byTitle": by_title,
                 })
                 if idx >= 0:
                     break

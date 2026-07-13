@@ -66,6 +66,23 @@ def build_server(config: Config | None = None) -> FastMCP:
         return await _run(session().login_interactive(timeout_s))
 
     @mcp.tool()
+    async def tg_login_phone(phone: str) -> str:
+        """Headless login step 1: submit the phone number. The code arrives on
+        the account's other logged-in devices (or SMS); pass it to tg_login_code."""
+        return await _run(session().login_phone_start(phone))
+
+    @mcp.tool()
+    async def tg_login_code(code: str) -> str:
+        """Headless login step 2: submit the confirmation code. May return
+        password_needed for 2FA accounts (then call tg_login_password)."""
+        return await _run(session().login_submit_code(code))
+
+    @mcp.tool()
+    async def tg_login_password(password: str) -> str:
+        """Headless login step 3: submit the two-factor password (2FA only)."""
+        return await _run(session().login_submit_password(password))
+
+    @mcp.tool()
     async def tg_open_chat(query: str) -> str:
         """Open a chat by @username or t.me link. Returns the last messages."""
         return await _run(ops().open_chat(query))
