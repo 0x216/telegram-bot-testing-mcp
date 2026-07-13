@@ -125,10 +125,14 @@ class TelegramOps:
 
     async def send_message(self, text: str) -> dict:
         page = await self._ready()
+        # Identical texts may already exist in history; only bubbles newer than
+        # this baseline count as "our" send.
+        before_max = max((m.id for m in await extract.read_messages(page, limit=10)),
+                         default=0)
         started = await self._press_start_if_needed(page)
         if started and text.strip().lower() == "/start":
             msgs = await extract.read_messages(page, limit=5)
-            mine = [m for m in msgs if m.out]
+            mine = [m for m in msgs if m.out and m.id > before_max]
             if mine:
                 return mine[-1].to_dict()
         # Several .input-message-input nodes coexist (the active one carries
@@ -165,9 +169,16 @@ class TelegramOps:
         deadline = loop.time() + 10
         while loop.time() < deadline:
             msgs = await extract.read_messages(page, limit=10)
-            mine = [m for m in msgs if m.out and text.strip() in m.text]
+            mine = [m for m in msgs if m.out and text.strip() in m.text
+                    and m.id > before_max]
             if mine:
-                return mine[-1].to_dict()
+                # Optimistic bubbles carry huge temporary mids until the server
+                # acks; give it a beat and prefer the settled (smallest) id.
+                await asyncio.sleep(1.0)
+                msgs = await extract.read_messages(page, limit=10)
+                mine = [m for m in msgs if m.out and text.strip() in m.text
+                        and m.id > before_max] or mine
+                return min(mine, key=lambda m: m.id).to_dict()
             await asyncio.sleep(0.3)
         raise SelectorBroken("sent message bubble")
 
@@ -239,41 +250,74 @@ class TelegramOps:
 
     async def click_reply_button(self, text: str) -> dict:
         page = await self._ready()
-        kb = page.locator(sel.REPLY_KEYBOARD)
-        if not await kb.count():
-            toggle = page.locator(sel.REPLY_KEYBOARD_TOGGLE)
-            if await toggle.count():
-                await toggle.click()
-                await asyncio.sleep(0.5)
-        buttons = page.locator(f"{sel.REPLY_KEYBOARD} {sel.REPLY_KEYBOARD_BUTTON}")
-        labels = []
-        for i in range(await buttons.count()):
-            labels.append((await buttons.nth(i).inner_text()).strip())
-        for i, label in enumerate(labels):
-            if text.lower() in label.lower():
-                await buttons.nth(i).click()
-                await asyncio.sleep(1.0)
+        before_max = max((m.id for m in await extract.read_messages(page, limit=10)),
+                         default=0)
+        loop = asyncio.get_event_loop()
+        labels: list[str] = []
+        # Pressing a reply button sends its label as a message; verify the
+        # outgoing bubble actually appeared and retry once if the click was
+        # swallowed mid-render.
+        for _attempt in range(2):
+            kb = page.locator(f"{sel.REPLY_KEYBOARD}:visible")
+            if not await kb.count():
+                toggle = page.locator(sel.REPLY_KEYBOARD_TOGGLE)
+                if await toggle.count():
+                    await toggle.first.click()
+                    await asyncio.sleep(0.7)
+            buttons = page.locator(f"{sel.REPLY_KEYBOARD} {sel.REPLY_KEYBOARD_BUTTON}")
+            labels = []
+            for i in range(await buttons.count()):
+                labels.append((await buttons.nth(i).inner_text()).strip())
+            target = next((i for i, lbl in enumerate(labels)
+                           if text.lower() in lbl.lower()), None)
+            if target is None:
+                continue
+            await buttons.nth(target).click()
+            deadline = loop.time() + 5
+            while loop.time() < deadline:
                 msgs = await extract.read_messages(page, limit=5)
-                return {"clicked": label, "messages": [m.to_dict() for m in msgs]}
+                if any(m.out and m.id > before_max
+                       and labels[target].lower() in m.text.lower() for m in msgs):
+                    # let the optimistic bubble settle to its server mid
+                    await asyncio.sleep(1.0)
+                    msgs = await extract.read_messages(page, limit=5)
+                    return {"clicked": labels[target],
+                            "messages": [m.to_dict() for m in msgs]}
+                await asyncio.sleep(0.4)
+        if labels and any(text.lower() in lbl.lower() for lbl in labels):
+            raise SelectorBroken(f"reply button {text!r} click did not send a message")
         raise ButtonNotFound(text, labels)
 
     # -- files / misc ----------------------------------------------------
 
-    async def send_file(self, path: str, caption: str | None = None) -> dict:
+    async def send_file(self, path: str, caption: str | None = None,
+                        kind: str = "auto") -> dict:
         page = await self._ready()
-        file_inputs = page.locator(sel.FILE_INPUT)
-        if not await file_inputs.count():
-            raise SelectorBroken("file input")
         before = {m.id for m in await extract.read_messages(page, limit=10) if m.out}
-        await file_inputs.first.set_input_files(path)
+        if kind == "auto":
+            kind = "photo" if path.lower().rsplit(".", 1)[-1] in (
+                "png", "jpg", "jpeg", "gif", "webp", "mp4", "mov") else "document"
+        # Feeding the hidden input directly skips WebK's willAttachType state,
+        # so go through the attach menu and catch the native file chooser.
+        await page.locator(sel.ATTACH_BUTTON).last.click()
+        pattern = re.compile("photo|video" if kind == "photo" else "document|file", re.I)
+        item = page.locator(sel.MENU_ITEM, has_text=pattern).first
+        try:
+            async with page.expect_file_chooser(timeout=10_000) as fc_info:
+                await item.click(timeout=5_000)
+            chooser = await fc_info.value
+            await chooser.set_files(path)
+        except Exception:
+            await page.keyboard.press("Escape")
+            raise SelectorBroken("attach menu / file chooser")
         try:
             await page.wait_for_selector(sel.ATTACH_POPUP, state="visible", timeout=10_000)
         except Exception:
             raise SelectorBroken("attach confirmation popup")
         if caption:
-            cap = page.locator(f"{sel.ATTACH_POPUP} {sel.MESSAGE_INPUT}")
+            cap = page.locator(f"{sel.ATTACH_POPUP} {sel.MESSAGE_INPUT}:visible")
             if await cap.count():
-                await cap.click()
+                await cap.first.click()
                 await page.keyboard.type(caption, delay=30)
         await page.locator(sel.ATTACH_POPUP_SEND).click()
         loop = asyncio.get_event_loop()
@@ -291,13 +335,15 @@ class TelegramOps:
         # clear/delete choices; for a 1:1 bot chat this wipes the history.
         page = await self._ready()
         await page.locator(sel.TOPBAR_MENU_BUTTON).last.click()
-        item = page.locator(sel.MENU_ITEM, has_text=re.compile("delete|clear", re.I))
+        # "delete" alone would match the "Auto-delete" menu item first.
+        item = page.locator(sel.MENU_ITEM,
+                            has_text=re.compile("delete chat|clear history", re.I))
         try:
             await item.first.click(timeout=5_000)
         except Exception:
             await page.keyboard.press("Escape")
-            raise SelectorBroken("'Delete/Clear' menu item")
-        confirm = page.locator(f"{sel.DELETE_POPUP} {sel.POPUP_DANGER_BUTTON}")
+            raise SelectorBroken("'Delete Chat'/'Clear history' menu item")
+        confirm = page.locator(f".popup:visible {sel.POPUP_DANGER_BUTTON}")
         try:
             await confirm.first.click(timeout=5_000)
         except Exception:

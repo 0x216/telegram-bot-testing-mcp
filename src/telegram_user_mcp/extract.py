@@ -73,6 +73,8 @@ def shape_messages(raw: list[dict]) -> list[Message]:
             media=r.get("media"),
         )
         for r in raw
+        # mid 0 = placeholder bubbles ("No messages here yet"), not messages
+        if int(r.get("mid") or 0) > 0
     ]
 
 

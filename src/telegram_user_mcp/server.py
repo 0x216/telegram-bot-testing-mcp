@@ -35,6 +35,17 @@ def build_server(config: Config | None = None) -> FastMCP:
     def _json(data) -> str:
         return json.dumps(data, ensure_ascii=False)
 
+    async def _run(coro) -> str:
+        """Every tool returns JSON — never a raw traceback across MCP."""
+        try:
+            return _json(await coro)
+        except AdapterError as e:
+            return _json(e.to_payload())
+        except Exception as e:
+            return _json({"error": "internal",
+                          "message": f"{type(e).__name__}: {e}",
+                          "hint": "Unexpected UI state; use tg_screenshot to inspect."})
+
     @mcp.tool()
     async def tg_status() -> str:
         """Report adapter mode, login state and profile location."""
@@ -52,80 +63,54 @@ def build_server(config: Config | None = None) -> FastMCP:
     async def tg_login(timeout_s: int = 300) -> str:
         """Open a visible browser window for one-time Telegram login (QR or phone).
         The session persists in the profile afterwards."""
-        try:
-            return _json(await session().login_interactive(timeout_s))
-        except AdapterError as e:
-            return _json(e.to_payload())
+        return await _run(session().login_interactive(timeout_s))
 
     @mcp.tool()
     async def tg_open_chat(query: str) -> str:
         """Open a chat by @username or t.me link. Returns the last messages."""
-        try:
-            return _json(await ops().open_chat(query))
-        except AdapterError as e:
-            return _json(e.to_payload())
+        return await _run(ops().open_chat(query))
 
     @mcp.tool()
     async def tg_send_message(text: str) -> str:
         """Send a text message or /command to the currently open chat."""
-        try:
-            return _json(await ops().send_message(text))
-        except AdapterError as e:
-            return _json(e.to_payload())
+        return await _run(ops().send_message(text))
 
     @mcp.tool()
-    async def tg_send_file(path: str, caption: str = "") -> str:
-        """Attach and send a file (photo/document) to the open chat."""
-        try:
-            return _json(await ops().send_file(path, caption or None))
-        except AdapterError as e:
-            return _json(e.to_payload())
+    async def tg_send_file(path: str, caption: str = "", kind: str = "auto") -> str:
+        """Attach and send a file to the open chat.
+        kind: auto (by extension) | photo | document."""
+        return await _run(ops().send_file(path, caption or None, kind))
 
     @mcp.tool()
     async def tg_read_messages(limit: int = 20) -> str:
         """Read the last messages of the open chat as structured JSON
         (id, direction, text, time, button grid, media kind)."""
-        try:
-            return _json(await ops().read_messages(limit))
-        except AdapterError as e:
-            return _json(e.to_payload())
+        return await _run(ops().read_messages(limit))
 
     @mcp.tool()
     async def tg_wait_for_message(timeout_s: float = 30, after_id: int = 0) -> str:
         """Block until the bot sends something new (the core test primitive).
         Returns the new incoming messages."""
-        try:
-            return _json(await ops().wait_for_message(timeout_s, after_id or None))
-        except AdapterError as e:
-            return _json(e.to_payload())
+        return await _run(ops().wait_for_message(timeout_s, after_id or None))
 
     @mcp.tool()
     async def tg_click_button(text: str = "", row: int = -1, col: int = -1,
                               message_id: int = 0) -> str:
         """Click an inline-keyboard button by text substring, or by 0-based row/col.
         Targets message_id or the last message that has buttons."""
-        try:
-            return _json(await ops().click_button(
-                text or None, row if row >= 0 else None,
-                col if col >= 0 else None, message_id or None))
-        except AdapterError as e:
-            return _json(e.to_payload())
+        return await _run(ops().click_button(
+            text or None, row if row >= 0 else None,
+            col if col >= 0 else None, message_id or None))
 
     @mcp.tool()
     async def tg_click_reply_button(text: str) -> str:
         """Click a reply-keyboard button (the keyboard shown near the input)."""
-        try:
-            return _json(await ops().click_reply_button(text))
-        except AdapterError as e:
-            return _json(e.to_payload())
+        return await _run(ops().click_reply_button(text))
 
     @mcp.tool()
     async def tg_clear_chat() -> str:
         """Clear the open chat's history (test isolation between scenarios)."""
-        try:
-            return _json(await ops().clear_chat())
-        except AdapterError as e:
-            return _json(e.to_payload())
+        return await _run(ops().clear_chat())
 
     @mcp.tool()
     async def tg_screenshot(scope: str = "chat", message_id: int = 0):
@@ -136,14 +121,14 @@ def build_server(config: Config | None = None) -> FastMCP:
             return Image(data=png, format="png")
         except AdapterError as e:
             return _json(e.to_payload())
+        except Exception as e:
+            return _json({"error": "internal", "message": f"{type(e).__name__}: {e}",
+                          "hint": "Unexpected UI state."})
 
     @mcp.tool()
     async def tg_miniapp_open(button_text: str = "") -> str:
         """Open a Mini App via a web-app button on the last message (or by text)."""
-        try:
-            return _json(await apps().open(button_text or None))
-        except AdapterError as e:
-            return _json(e.to_payload())
+        return await _run(apps().open(button_text or None))
 
     @mcp.tool()
     async def tg_miniapp_snapshot(max_elements: int = 150) -> str:
@@ -153,22 +138,19 @@ def build_server(config: Config | None = None) -> FastMCP:
             return await apps().snapshot(max_elements)
         except AdapterError as e:
             return _json(e.to_payload())
+        except Exception as e:
+            return _json({"error": "internal", "message": f"{type(e).__name__}: {e}",
+                          "hint": "Unexpected UI state."})
 
     @mcp.tool()
     async def tg_miniapp_click(ref: str) -> str:
         """Click an element inside the Mini App by its snapshot ref (e.g. 'e3')."""
-        try:
-            return _json(await apps().click(ref))
-        except AdapterError as e:
-            return _json(e.to_payload())
+        return await _run(apps().click(ref))
 
     @mcp.tool()
     async def tg_miniapp_type(ref: str, text: str) -> str:
         """Type text into a Mini App input by its snapshot ref."""
-        try:
-            return _json(await apps().type(ref, text))
-        except AdapterError as e:
-            return _json(e.to_payload())
+        return await _run(apps().type(ref, text))
 
     @mcp.tool()
     async def tg_miniapp_screenshot():
@@ -177,14 +159,14 @@ def build_server(config: Config | None = None) -> FastMCP:
             return Image(data=await apps().screenshot(), format="png")
         except AdapterError as e:
             return _json(e.to_payload())
+        except Exception as e:
+            return _json({"error": "internal", "message": f"{type(e).__name__}: {e}",
+                          "hint": "Unexpected UI state."})
 
     @mcp.tool()
     async def tg_miniapp_close() -> str:
         """Close the open Mini App popup."""
-        try:
-            return _json(await apps().close())
-        except AdapterError as e:
-            return _json(e.to_payload())
+        return await _run(apps().close())
 
     return mcp
 

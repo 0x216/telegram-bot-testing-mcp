@@ -62,7 +62,7 @@ ATTACH_POPUP_SEND = ".popup-new-media .btn-primary.btn-color-primary"  # [src] p
 # --- chat chrome --------------------------------------------------------------------
 CHAT_CONTAINER = ".bubbles"                  # [src] bubbles.ts:1434
 TOPBAR = ".sidebar-header.topbar"            # [src] topbar.ts:128
-TOPBAR_MENU_BUTTON = ".sidebar-header.topbar .btn-menu-toggle"  # [e2e] btnMore (ButtonMenuToggle)
+TOPBAR_MENU_BUTTON = ".sidebar-header.topbar .btn-menu-toggle:visible"  # [live] btnMore; hidden pinned-menu toggles share the class
 MENU_ITEM = ".btn-menu-item"                 # [src] ButtonMenu convention
 DELETE_POPUP = ".popup-delete-chat"          # [src] deleteDialog.ts:234
 POPUP_DANGER_BUTTON = ".popup-button.btn.danger"  # [src] popups/index.ts:263
