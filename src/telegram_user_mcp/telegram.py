@@ -157,8 +157,10 @@ class TelegramOps:
             if current.strip():
                 await page.keyboard.press("Control+a")
                 await page.keyboard.press("Delete")
-            await page.keyboard.type(text, delay=30)
-            await asyncio.sleep(0.2)
+            # insert_text (not type): emoji and other astral-plane chars are
+            # silently dropped by synthesized keydown events
+            await page.keyboard.insert_text(text)
+            await asyncio.sleep(0.3)
             typed = await page.evaluate(_READ_JS, sel.MESSAGE_INPUT)
             if typed is not None and typed.strip() == text.strip():
                 break

@@ -26,7 +26,8 @@ async def test_reads_text_and_direction(page):
     assert incoming[0].text.startswith("fixture bot ready")
     assert "19:01" not in incoming[0].text  # time stripped from text
     assert incoming[0].time == "19:01"
-    assert outgoing[0].text == "hello bot"
+    # emoji render as <img> in WebK; extraction must keep them via alt text
+    assert outgoing[0].text == "hello bot 🥛"
     assert isinstance(incoming[0].id, int) and incoming[0].id == 101
 
 

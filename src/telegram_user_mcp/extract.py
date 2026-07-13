@@ -31,7 +31,11 @@ MESSAGES_JS = """
     if (textEl) {
       const clone = textEl.cloneNode(true);
       clone.querySelectorAll(args.timeSel).forEach(t => t.remove());
-      text = (clone.innerText || '').trim();
+      // WebK renders emoji as <img> (textContent drops them) and line breaks
+      // as <br> (lost on detached clones) — restore both explicitly.
+      clone.querySelectorAll('br').forEach(b => b.replaceWith('\\n'));
+      clone.querySelectorAll('img[alt]').forEach(i => i.replaceWith(i.getAttribute('alt')));
+      text = (clone.textContent || '').trim();
     }
     return {
       mid: Number(b.dataset.mid || 0),

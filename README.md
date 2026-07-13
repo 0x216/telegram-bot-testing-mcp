@@ -32,8 +32,8 @@ Telegram sees a normal, official web client.
 ```bash
 # 1. Install (Python 3.11+; from GitHub until the PyPI release)
 uv tool install git+https://github.com/0x216/telegram-bot-testing-mcp
-# or: pipx install git+https://github.com/0x216/telegram-bot-testing-mcp
-playwright install chromium
+# download the browser (playwright lives inside the tool's env, so go through uvx):
+uvx --from git+https://github.com/0x216/telegram-bot-testing-mcp playwright install chromium
 
 # 2. Log in once (opens a browser window — scan the QR with a dedicated account)
 telegram-bot-testing-mcp login
@@ -93,6 +93,22 @@ password. Use a **dedicated test account**, not your personal one: any
 automation that can send messages from your account is worth isolating.
 The profile stays on your machine; nothing is sent anywhere except to
 Telegram itself.
+
+## Headless servers (CI boxes, VPS)
+
+Everything except `login` is headless by default. `login` opens a browser
+window, which needs a display — on a headless server it fails with
+"Looks like you launched a headed browser without having a XServer running".
+The recipe: log in once on any desktop machine, then move the profile —
+it is just a directory and transfers fine across OSes (verified Windows → Linux):
+
+```bash
+tar -czf tg-profile.tgz -C ~/.telegram-user-mcp profile-prod
+scp tg-profile.tgz server:
+ssh server 'mkdir -p ~/.telegram-user-mcp && tar -xzf tg-profile.tgz -C ~/.telegram-user-mcp'
+```
+
+Treat the archive like a password — it contains your session.
 
 ## Testing against the Telegram test DC
 

@@ -24,6 +24,18 @@ def main() -> None:
             s = BrowserSession(Config.from_env())
             try:
                 print(json.dumps(await s.login_interactive(args.timeout)))
+            except Exception as e:
+                msg = str(e)
+                if "XServer" in msg or "Target page, context or browser has been closed" in msg:
+                    print(json.dumps({
+                        "error": "no_display",
+                        "message": "login opens a browser window and needs a display; "
+                                   "this machine appears to be headless.",
+                        "hint": "Log in on a desktop machine and copy the profile dir "
+                                "(~/.telegram-user-mcp) here — see README 'Headless servers'.",
+                    }))
+                    raise SystemExit(1)
+                raise
             finally:
                 await s.stop()
 
