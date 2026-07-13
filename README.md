@@ -1,16 +1,22 @@
 # telegram-bot-testing-mcp
 
-**Test Telegram bots and Mini Apps as a real user — from Claude Code or any MCP client.**
+**Write test scenarios for your Telegram bot — Claude runs them like a human QA.**
 
 AI agents can already test any website through browser automation. This MCP server
-gives them the same power over Telegram: it drives the **official Telegram Web
-client** (web.telegram.org) in a real browser, so your agent interacts with your
-bot exactly the way a human does — opens the chat, sends messages and files,
-presses inline buttons, reads structured replies, opens Mini Apps, and takes
-screenshots for design review.
+gives them the same power over Telegram bots and Mini Apps: it drives the
+**official Telegram Web client** (web.telegram.org) in a real browser. Your agent
+gets exactly the input a real user gets — the same rendered chat, the same
+keyboards, the same Mini App — so it can verify not just that the bot *responds*,
+but that nothing is broken **visually**: keyboards render in the right shape,
+edits land, media shows up, the Mini App actually opens.
+
+Instead of clicking through your bot by hand after every deploy, you describe the
+scenario once and let the agent execute it — sending /commands, pressing the
+buttons, uploading files, comparing what it sees against what you expected, and
+attaching screenshots as evidence.
 
 No MTProto libraries, no session-string hacks, no bot token on the user side.
-The Telegram servers see a normal, official web client.
+Telegram sees a normal, official web client.
 
 ## Why not telethon / Bot API?
 
@@ -24,8 +30,9 @@ The Telegram servers see a normal, official web client.
 ## Quickstart
 
 ```bash
-# 1. Install (Python 3.11+)
-uv tool install telegram-bot-testing-mcp   # or: pipx install telegram-bot-testing-mcp
+# 1. Install (Python 3.11+; from GitHub until the PyPI release)
+uv tool install git+https://github.com/0x216/telegram-bot-testing-mcp
+# or: pipx install git+https://github.com/0x216/telegram-bot-testing-mcp
 playwright install chromium
 
 # 2. Log in once (opens a browser window — scan the QR with a dedicated account)
@@ -35,8 +42,17 @@ telegram-bot-testing-mcp login
 claude mcp add telegram -- telegram-bot-testing-mcp
 ```
 
-Then just ask your agent: *"open a chat with @my_bot, send /start, press the
-Pay button and show me a screenshot of the result."*
+Then hand your agent a scenario instead of testing by hand:
+
+> Run a regression pass on @my_bot:
+> 1. `/start` — the welcome message must show the pricing keyboard, 2 rows of 2.
+> 2. Press **Buy** — the bot must *edit* that message into a payment summary.
+> 3. Send `PROMO2026` — the reply must confirm the discount.
+> 4. Open the Mini App from the **Catalog** button and add the first item to cart.
+> 5. Screenshot every step and flag anything that renders wrong.
+
+The agent executes it step by step with the same input a human tester would have,
+and reports what passed, what failed, and how it looked.
 
 ## Tools
 
