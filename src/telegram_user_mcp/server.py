@@ -88,9 +88,16 @@ def build_server(config: Config | None = None) -> FastMCP:
         return await _run(ops().open_chat(query))
 
     @mcp.tool()
-    async def tg_send_message(text: str) -> str:
-        """Send a text message or /command to the currently open chat."""
-        return await _run(ops().send_message(text))
+    async def tg_send_message(text: str, reply_to: int = 0) -> str:
+        """Send a text message or /command to the currently open chat.
+        reply_to: message id to reply to (0 = plain message)."""
+        return await _run(ops().send_message(text, reply_to or None))
+
+    @mcp.tool()
+    async def tg_forward_message(message_id: int, to_chat: str = "") -> str:
+        """Forward a message by id via the forward picker. Empty to_chat
+        forwards to the current chat (typical bot-test loop)."""
+        return await _run(ops().forward_message(message_id, to_chat or None))
 
     @mcp.tool()
     async def tg_send_file(path: str, caption: str = "", kind: str = "auto") -> str:

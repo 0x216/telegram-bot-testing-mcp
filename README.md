@@ -63,7 +63,8 @@ and reports what passed, what failed, and how it looked.
 | `tg_login_phone` / `tg_login_code` / `tg_login_password` | Headless login by phone number — the code arrives on the account's other devices |
 | `tg_send_voice` | Record & send a real voice message through a fake microphone (WAV input) |
 | `tg_open_chat` | Open chat by `@username` / t.me link |
-| `tg_send_message` | Send text or /command |
+| `tg_send_message` | Send text or /command; `reply_to` replies to a specific message |
+| `tg_forward_message` | Forward a message via the real forward picker |
 | `tg_send_file` | Attach & send photo/document (with caption) |
 | `tg_read_messages` | Last N messages as structured JSON (text, buttons grid, media kind, ids) |
 | `tg_wait_for_message` | Block until the bot replies — the core test primitive |
@@ -162,7 +163,7 @@ Statuses are earned, not promised:
 | Formatting entities (bold/links/code/spoilers) | 🟡 | extracted as plain text; markup structure not exposed |
 | Photo | ✅ | `media: "photo"` |
 | Video | 🟡 | `media: "video"` |
-| GIF / animation | 🟡 | likely detected as `video`; unverified |
+| GIF / animation | ✅ | detected as `video` |
 | Video note (round) | 🟡 | `media: "round_video"` |
 | Voice | ✅ | `media: "voice"` |
 | Audio file | 🟡 | `media: "audio"` |
@@ -171,15 +172,16 @@ Statuses are earned, not promised:
 | Album / media group | 🟡 | read as one message; items not split out |
 | Message edit by bot | ✅ | verified via re-read after callback |
 | Message deletion by bot | 🟡 | disappears from `tg_read_messages`; no explicit event |
-| Location / venue | 🔴 | renders in chat; not detected in `media` |
-| Live location | 🔴 | |
-| Contact | 🔴 | |
-| Poll / quiz | 🔴 | options and vote counts not extracted |
-| Dice / darts / slots | 🔴 | |
+| Location | ✅ | `media: "location"` |
+| Venue | ✅ | `media: "venue"`, title/address in text |
+| Live location | 🟡 | detected as `location`; live updates not tracked |
+| Contact | ✅ | `media: "contact"`, name/number in text |
+| Poll / quiz | ✅ | `poll: {question, options}`; vote counts not yet |
+| Dice / darts / slots | ⚪ | the web client renders them as plain animated stickers — indistinguishable |
 | Invoice (payments) | 🔴 | Pay button is enumerable; checkout flow unsupported |
-| Forward header ("Forwarded from") | 🔴 | not exposed in message JSON |
-| Reply-to attribution | 🔴 | not exposed in message JSON |
-| Sender attribution | 🔴 | trivial in 1:1 chats; matters for groups |
+| Forward header ("Forwarded from") | ✅ | `forwarded_from: <origin name>` |
+| Reply-to attribution | ✅ | `reply_to: {title, quote}` |
+| Sender attribution | 🟡 | `sender` field; only rendered in group-like contexts (untested) |
 | Reactions set by the bot | 🔴 | |
 | Link preview / web page card | 🔴 | text extracted, preview card not flagged |
 | Service messages | ✅ | flagged `service: true` |
@@ -209,8 +211,8 @@ Statuses are earned, not promised:
 | Send video note (webcam round) | 🔴 | possible via fake video device; not implemented |
 | Send sticker / GIF (pickers) | 🔴 | |
 | Create a poll | 🔴 | web client supports it; not implemented |
-| Forward a message | 🔴 | |
-| Reply to a specific message | 🔴 | |
+| Forward a message | ✅ | `tg_forward_message` via the real picker; bot-side receipt verified |
+| Reply to a specific message | ✅ | `tg_send_message(reply_to=...)`; bot-side receipt verified |
 | Edit / delete own message | 🔴 | |
 | Set a reaction | 🔴 | |
 | Inline mode (`@bot query` + result picker) | 🔴 | biggest gap for inline bots |
@@ -233,9 +235,12 @@ Statuses are earned, not promised:
 | Payment checkout (test provider) | 🔴 | feasible on the test DC |
 | Groups / channels / topics | 🔴 | designed for 1:1 bot chats so far |
 
-Roadmap order for the 🔴s: (1) extraction attributes — forward/reply/sender,
-location/poll/contact/dice detection; (2) reply & forward tools; (3) inline
-mode; (4) payment checkout on the test DC; (5) sticker/GIF pickers.
+Roadmap order for the 🔴s: (1) inline mode; (2) payment checkout on the
+test DC; (3) sticker/GIF pickers; (4) groups/channels.
+
+Note on message ids: they are the web client's DOM ids. All adapter tools
+speak them consistently, but they can diverge from Bot API `message_id`s
+(observed after a history clear) — never compare the two directly.
 
 ## Limitations
 

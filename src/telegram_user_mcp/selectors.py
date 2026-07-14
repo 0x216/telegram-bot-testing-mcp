@@ -75,6 +75,16 @@ MEDIA_DETECTORS = [
     ["inner", ".document", "document"],
 ]
 
+# context menu / forwarding [live 2026-07]
+TEXT_MENU_REPLY = "Reply"
+TEXT_MENU_FORWARD = "Forward"
+# the forward picker's root div is classless; anchor via its confirm button
+FWD_PICKER = "body > div:has(.simple-message-input-confirm)"
+FWD_PICKER_SEARCH = FWD_PICKER + " input.input-search-input"
+FWD_PICKER_ROW = FWD_PICKER + " a[data-peer-id]"
+FWD_CONFIRM = ".simple-message-input-confirm"
+TOPBAR_TITLE = ".topbar .peer-title"          # current chat title (scope with ACTIVE_CHAT)
+
 # message sub-structures [live 2026-07]
 REPLY_TITLE = ".reply .reply-title .peer-title"   # who is being replied to
 REPLY_QUOTE = ".reply .reply-subtitle"            # quoted text

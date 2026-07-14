@@ -95,8 +95,9 @@ def handle_message(msg: dict):
              text=f"got forward (origin: {fwd.get('type')})")
         return
     if reply_to and text:
+        quoted = (reply_to.get("text") or reply_to.get("caption") or "<media>")[:30]
         call("sendMessage", chat_id=chat_id,
-             text=f"echo(reply to {reply_to['message_id']}): {text}")
+             text=f"echo(reply to {reply_to['message_id']} {quoted!r}): {text}")
         return
     if text == "/start":
         call("sendMessage", chat_id=chat_id,

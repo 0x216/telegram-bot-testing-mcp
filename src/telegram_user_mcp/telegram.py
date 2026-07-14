@@ -112,13 +112,29 @@ class TelegramOps:
             return True
         return False
 
-    async def send_message(self, text: str) -> dict:
+    async def _open_bubble_menu_item(self, page, message_id: int, item_text: str):
+        bubble = page.locator(
+            f'{sel.ACTIVE_CHAT} {sel.BUBBLE}[data-mid="{message_id}"]')
+        if not await bubble.count():
+            raise ChatNotFound(f"message {message_id}")
+        await bubble.first.click(button="right")
+        item = page.locator(sel.MENU_ITEM, has_text=item_text)
+        try:
+            await item.first.click(timeout=tm.MENU_ITEM_TIMEOUT_MS)
+        except Exception:
+            await page.keyboard.press("Escape")
+            raise SelectorBroken(f"{item_text!r} in the message context menu")
+        await asyncio.sleep(tm.UI_SETTLE_S)
+
+    async def send_message(self, text: str, reply_to: int | None = None) -> dict:
         page = await self._ready()
         # Identical texts may already exist in history; only bubbles newer than
         # this baseline count as "our" send. sort_id keeps fractional pending
         # mids (208.0001) distinguishable from their integer neighbours.
         before_max = max((m.sort_id for m in await extract.read_messages(page, limit=10)),
                          default=0.0)
+        if reply_to is not None:
+            await self._open_bubble_menu_item(page, reply_to, sel.TEXT_MENU_REPLY)
         started = await self._press_start_if_needed(page)
         if started and text.strip().lower() == "/start":
             msgs = await extract.read_messages(page, limit=5)
@@ -260,6 +276,8 @@ class TelegramOps:
                 "png", "jpg", "jpeg", "gif", "webp", "mp4", "mov") else "document"
         # Feeding the hidden input directly skips WebK's willAttachType state,
         # so go through the attach menu and catch the native file chooser.
+        await page.keyboard.press("Escape")  # dismiss any lingering overlay
+        await asyncio.sleep(tm.UI_SETTLE_S)
         await page.locator(f"{sel.ACTIVE_CHAT} {sel.ATTACH_BUTTON}").last.click()
         pattern = re.compile("photo|video" if kind == "photo" else "document|file", re.I)
         item = page.locator(sel.MENU_ITEM, has_text=pattern).first
@@ -334,6 +352,62 @@ class TelegramOps:
                 return mine[-1].to_dict()
             await asyncio.sleep(tm.POLL_S)
         raise SelectorBroken("sent voice bubble (recording may have failed)")
+
+    async def forward_message(self, message_id: int, to_chat: str | None = None) -> dict:
+        """Forward a message via the picker. Default target: the current chat
+        (forwarding a bot's message back to it is the common test loop)."""
+        page = await self._ready()
+        if to_chat is None:
+            title_el = page.locator(f"{sel.ACTIVE_CHAT} {sel.TOPBAR_TITLE}").first
+            to_chat = (await title_el.inner_text()).strip()
+        before_max = max((m.sort_id for m in await extract.read_messages(page, limit=10)),
+                         default=0.0)
+        await self._open_bubble_menu_item(page, message_id, sel.TEXT_MENU_FORWARD)
+        try:
+            await page.wait_for_selector(sel.FWD_PICKER_SEARCH, state="visible",
+                                         timeout=tm.MENU_ITEM_TIMEOUT_MS)
+        except Exception:
+            await page.keyboard.press("Escape")
+            raise SelectorBroken("forward picker")
+        await page.locator(sel.FWD_PICKER_SEARCH).first.click()
+        await page.keyboard.type(to_chat, delay=tm.TYPE_DELAY_MS)
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + tm.SEARCH_ROUND_TIMEOUT_S
+        idx = -1
+        while loop.time() < deadline:
+            idx = await page.evaluate(js.FIND_SEARCH_ROW, {
+                "rowSel": sel.FWD_PICKER_ROW, "username": to_chat, "byTitle": True,
+            })
+            if idx >= 0:
+                break
+            await asyncio.sleep(tm.POLL_S)
+        if idx < 0:
+            await page.keyboard.press("Escape")
+            raise ChatNotFound(to_chat)
+        await page.locator(sel.FWD_PICKER_ROW).nth(idx).click()
+        try:
+            await page.locator(sel.FWD_CONFIRM).first.click(
+                timeout=tm.MENU_ITEM_TIMEOUT_MS)
+        except Exception:
+            await page.keyboard.press("Escape")
+            raise SelectorBroken("forward confirm button")
+        # the picker fades out asynchronously; don't leave it intercepting
+        # the next operation's clicks
+        try:
+            await page.wait_for_selector(sel.FWD_PICKER_SEARCH, state="hidden",
+                                         timeout=tm.MENU_ITEM_TIMEOUT_MS)
+        except Exception:
+            await page.keyboard.press("Escape")
+        deadline = loop.time() + tm.SEND_CONFIRM_TIMEOUT_S
+        while loop.time() < deadline:
+            msgs = await extract.read_messages(page, limit=10)
+            fresh = [m for m in msgs if m.out and not m.sending
+                     and m.sort_id > before_max]
+            if fresh:
+                return fresh[-1].to_dict()
+            await asyncio.sleep(tm.POLL_S)
+        return {"status": "forwarded",
+                "note": "target chat is not the current one; bubble not visible here"}
 
     async def clear_chat(self) -> dict:
         # WebK's topbar menu offers "Delete" which opens PopupPeer with

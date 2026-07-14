@@ -160,6 +160,12 @@ async def main() -> None:
                   json.dumps(fresh)[:250])
 
             fresh = await command_reply("/forwarded")
+            if not any(m.get("forwarded_from") for m in fresh):
+                extra = parse(await s.call_tool("tg_wait_for_message",
+                                                {"timeout_s": 15, "after_id": last}))
+                if isinstance(extra, list):
+                    fresh += extra
+                    last = max(last, max_id(extra))
             fwd = next((m for m in fresh if m.get("forwarded_from")), None)
             check("forward header extracted",
                   bool(fwd) and "Fixture" in fwd["forwarded_from"],
@@ -193,6 +199,47 @@ async def main() -> None:
             check("gif/animation detected (as video)",
                   any(m.get("media") == "video" for m in fresh),
                   json.dumps(fresh)[:250])
+
+            print("== user replies to a specific message")
+            msgs = parse(await s.call_tool("tg_read_messages", {"limit": 10}))
+            target = next((m for m in reversed(msgs) if not m.get("out")
+                           and not m.get("service")), None)
+            check("reply target found", bool(target), json.dumps(msgs)[:200])
+            print(f"  [debug] reply target id={target and target['id']} "
+                  f"text={target and target.get('text', '')[:30]!r}")
+            if target:
+                sent = parse(await s.call_tool(
+                    "tg_send_message",
+                    {"text": "replying to you", "reply_to": target["id"]}))
+                check("reply sent with attribution",
+                      isinstance(sent, dict) and bool(sent.get("reply_to")),
+                      json.dumps(sent)[:250])
+                last = max(last, max_id(sent))
+                fresh = parse(await s.call_tool("tg_wait_for_message",
+                                                {"timeout_s": 30, "after_id": last}))
+                # NB: DOM message ids are client-side and may diverge from
+                # Bot API ids (e.g. after a history clear) — verify by the
+                # quoted text instead.
+                snippet = (target.get("text") or "")[:15]
+                ok = isinstance(fresh, list) and any(
+                    "echo(reply to" in m.get("text", "")
+                    and snippet in m.get("text", "") for m in fresh)
+                check("bot saw the reply with the right quoted text", ok,
+                      json.dumps(fresh)[:250])
+                last = max(last, max_id(fresh))
+
+            print("== user forwards a message back to the bot")
+            fwd_res = parse(await s.call_tool(
+                "tg_forward_message", {"message_id": target["id"]}))
+            check("forward sent", isinstance(fwd_res, dict) and "error" not in fwd_res,
+                  json.dumps(fwd_res)[:250])
+            last = max(last, max_id(fwd_res))
+            fresh = parse(await s.call_tool("tg_wait_for_message",
+                                            {"timeout_s": 30, "after_id": last}))
+            ok = isinstance(fresh, list) and any(
+                "got forward" in m.get("text", "") for m in fresh)
+            check("bot received the forward", ok, json.dumps(fresh)[:250])
+            last = max(last, max_id(fresh))
 
             print("== send file to bot")
             tiny = OUT / "upload.png"
