@@ -4,6 +4,7 @@ import asyncio
 import re
 
 from . import selectors as sel
+from . import timings as tm
 from .errors import MiniAppNotOpen, SelectorBroken
 from .session import BrowserSession
 
@@ -68,14 +69,15 @@ class MiniAppOps:
         confirm = page.locator(".popup:visible .popup-button, .popup:visible button",
                                has_text=re.compile(r"^(open|launch|confirm)", re.I))
         try:
-            await confirm.first.click(timeout=4_000)
+            await confirm.first.click(timeout=tm.MINIAPP_CONFIRM_TIMEOUT_MS)
         except Exception:
             pass
         try:
-            await page.wait_for_selector(sel.WEBAPP_IFRAME, state="attached", timeout=15_000)
+            await page.wait_for_selector(sel.WEBAPP_IFRAME, state="attached",
+                                         timeout=tm.MINIAPP_IFRAME_TIMEOUT_MS)
         except Exception:
             raise SelectorBroken("web-app iframe (did the button open a Mini App?)")
-        await asyncio.sleep(1.5)  # let the app boot
+        await asyncio.sleep(tm.MINIAPP_BOOT_S)
         frame = await self._frame()
         return {"status": "open", "url": frame.url}
 
@@ -89,7 +91,7 @@ class MiniAppOps:
         if not await loc.count():
             raise SelectorBroken(f"mini-app element {ref} (take a fresh tg_miniapp_snapshot)")
         await loc.click()
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(tm.MINIAPP_ACTION_S)
         return {"clicked": ref}
 
     async def type(self, ref: str, text: str) -> dict:
@@ -111,7 +113,7 @@ class MiniAppOps:
         async def gone() -> bool:
             try:
                 await page.wait_for_selector(sel.WEBAPP_IFRAME, state="detached",
-                                             timeout=4_000)
+                                             timeout=tm.MINIAPP_CLOSE_TIMEOUT_MS)
                 return True
             except Exception:
                 return await page.locator(sel.WEBAPP_IFRAME).count() == 0

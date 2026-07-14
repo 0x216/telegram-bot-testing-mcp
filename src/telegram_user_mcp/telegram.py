@@ -5,6 +5,7 @@ import re
 
 from . import extract
 from . import selectors as sel
+from . import timings as tm
 from .errors import (
     AdapterError,
     ButtonNotFound,
@@ -74,12 +75,12 @@ class TelegramOps:
 
     async def _type_into_search(self, page, text: str) -> bool:
         search = page.locator(sel.SEARCH_INPUT).first
-        await search.wait_for(state="visible", timeout=15_000)
+        await search.wait_for(state="visible", timeout=tm.BOOT_TIMEOUT_MS)
         await search.click()
         await page.keyboard.press("Control+a")
         await page.keyboard.press("Delete")
-        await page.keyboard.type(text, delay=50)
-        await asyncio.sleep(0.3)
+        await page.keyboard.type(text, delay=tm.TYPE_DELAY_MS)
+        await asyncio.sleep(tm.UI_SETTLE_S)
         typed = await search.input_value()
         return typed.strip().lower() == text.strip().lower()
 
@@ -97,14 +98,14 @@ class TelegramOps:
         # and keystrokes typed during SPA boot get swallowed, leaving the search
         # stuck on a stale query. Escape closes the search overlay so the next
         # round starts a fresh query.
-        for _attempt in range(3):
+        for _attempt in range(tm.SEARCH_ROUNDS):
             if _attempt:
                 await page.keyboard.press("Escape")
-                await asyncio.sleep(2)
+                await asyncio.sleep(tm.SPA_RETRY_PAUSE_S)
             if not await self._type_into_search(page, username):
-                await asyncio.sleep(2)  # SPA not ready to accept input yet
+                await asyncio.sleep(tm.SPA_RETRY_PAUSE_S)  # SPA not ready yet
                 continue
-            deadline = loop.time() + 15
+            deadline = loop.time() + tm.SEARCH_ROUND_TIMEOUT_S
             while loop.time() < deadline:
                 idx = await page.evaluate(self._FIND_ROW_JS, {
                     "rowSel": sel.SEARCH_RESULT_ROW, "username": username,
@@ -112,7 +113,7 @@ class TelegramOps:
                 })
                 if idx >= 0:
                     break
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(tm.POLL_S)
             if idx >= 0:
                 break
         if idx < 0:
@@ -120,10 +121,12 @@ class TelegramOps:
             raise ChatNotFound(query)
         await page.locator(sel.SEARCH_RESULT_ROW).nth(idx).click()
         try:
-            await page.wait_for_selector(sel.MESSAGE_INPUT, state="visible", timeout=10_000)
+            await page.wait_for_selector(f"{sel.ACTIVE_CHAT} {sel.MESSAGE_INPUT}",
+                                         state="visible",
+                                         timeout=tm.CHAT_OPEN_TIMEOUT_MS)
         except Exception:
             raise SelectorBroken("message composer after opening the chat")
-        await asyncio.sleep(1.0)  # let history render
+        await asyncio.sleep(tm.HISTORY_RENDER_S)
         self._current_chat = query
         msgs = await extract.read_messages(page, limit=5)
         return {"chat": username, "messages": [m.to_dict() for m in msgs]}
@@ -135,25 +138,26 @@ class TelegramOps:
     async def _press_start_if_needed(self, page) -> bool:
         # Un-started bot chats cover the composer with a START control;
         # pressing it is Telegram's way of sending /start.
-        ctl = page.locator(sel.START_CONTROL)
+        ctl = page.locator(f"{sel.ACTIVE_CHAT} {sel.START_CONTROL}")
         if await ctl.count() and await ctl.first.is_visible():
             btn = ctl.first.locator("button:visible")
             target = btn.first if await btn.count() else ctl.first
             await target.click()
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(tm.START_OVERLAY_S)
             return True
         return False
 
     async def send_message(self, text: str) -> dict:
         page = await self._ready()
         # Identical texts may already exist in history; only bubbles newer than
-        # this baseline count as "our" send.
-        before_max = max((m.id for m in await extract.read_messages(page, limit=10)),
-                         default=0)
+        # this baseline count as "our" send. sort_id keeps fractional pending
+        # mids (208.0001) distinguishable from their integer neighbours.
+        before_max = max((m.sort_id for m in await extract.read_messages(page, limit=10)),
+                         default=0.0)
         started = await self._press_start_if_needed(page)
         if started and text.strip().lower() == "/start":
             msgs = await extract.read_messages(page, limit=5)
-            mine = [m for m in msgs if m.out and m.id > before_max]
+            mine = [m for m in msgs if m.out and m.sort_id > before_max]
             if mine:
                 return mine[-1].to_dict()
         # Several .input-message-input nodes coexist (the active one carries
@@ -172,7 +176,8 @@ class TelegramOps:
           return el ? (el.textContent || '') : null;
         }"""
         for _attempt in range(3):
-            current = await page.evaluate(_FOCUS_JS, sel.MESSAGE_INPUT)
+            current = await page.evaluate(_FOCUS_JS,
+                                          f"{sel.ACTIVE_CHAT} {sel.MESSAGE_INPUT}")
             if current is None:
                 raise SelectorBroken("message input (is a chat open?)")
             if current.strip():
@@ -181,31 +186,36 @@ class TelegramOps:
             # insert_text (not type): emoji and other astral-plane chars are
             # silently dropped by synthesized keydown events
             await page.keyboard.insert_text(text)
-            await asyncio.sleep(0.3)
-            typed = await page.evaluate(_READ_JS, sel.MESSAGE_INPUT)
+            await asyncio.sleep(tm.UI_SETTLE_S)
+            typed = await page.evaluate(_READ_JS, f"{sel.ACTIVE_CHAT} {sel.MESSAGE_INPUT}")
             if typed is not None and typed.strip() == text.strip():
                 break
         else:
             raise SelectorBroken("composer did not accept the typed text")
         await page.keyboard.press("Enter")
         loop = asyncio.get_event_loop()
-        deadline = loop.time() + 10
+        deadline = loop.time() + tm.SEND_CONFIRM_TIMEOUT_S
+        pending_seen = False
         while loop.time() < deadline:
             msgs = await extract.read_messages(page, limit=10)
             mine = [m for m in msgs if m.out and text.strip() in m.text
-                    and m.id > before_max]
-            if mine:
-                # Optimistic bubbles carry huge temporary mids until the server
-                # acks; give it a beat and prefer the settled (smallest) id.
-                await asyncio.sleep(1.0)
-                msgs = await extract.read_messages(page, limit=10)
-                mine = [m for m in msgs if m.out and text.strip() in m.text
-                        and m.id > before_max] or mine
-                return min(mine, key=lambda m: m.id).to_dict()
-            await asyncio.sleep(0.3)
+                    and m.sort_id > before_max]
+            if any(m.failed for m in mine):
+                raise AdapterError("Telegram marked the message as failed (is-error).",
+                                   hint="Check the connection/session and retry.")
+            delivered = [m for m in mine if not m.sending]
+            if delivered:
+                return min(delivered, key=lambda m: m.sort_id).to_dict()
+            pending_seen = pending_seen or bool(mine)
+            await asyncio.sleep(tm.POLL_FAST_S)
+        if pending_seen:
+            raise AdapterError(
+                "Message is stuck in the 'sending' state — Telegram did not "
+                "acknowledge it in time.",
+                hint="Connection or session problem; check tg_status, or re-login.")
         raise SelectorBroken("sent message bubble")
 
-    async def wait_for_message(self, timeout_s: float = 30,
+    async def wait_for_message(self, timeout_s: float = tm.WAIT_MESSAGE_DEFAULT_S,
                                after_id: int | None = None) -> list[dict]:
         page = await self._ready()
         if after_id is None:
@@ -218,7 +228,7 @@ class TelegramOps:
             fresh = [m for m in msgs if not m.out and not m.service and m.id > after_id]
             if fresh:
                 return [m.to_dict() for m in fresh]
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(tm.POLL_S)
         raise WaitTimeout(timeout_s)
 
     # -- buttons ---------------------------------------------------------
@@ -249,7 +259,7 @@ class TelegramOps:
                            col: int | None = None, message_id: int | None = None) -> dict:
         page = await self._ready()
         buttons = await page.evaluate(self._BUTTONS_JS, {
-            "mid": message_id, "bubbleSel": sel.BUBBLE,
+            "mid": message_id, "bubbleSel": f"{sel.ACTIVE_CHAT} {sel.BUBBLE}",
             "rowSel": sel.INLINE_ROW, "btnSel": sel.INLINE_BUTTON,
             "btnTextSel": sel.INLINE_BUTTON_TEXT,
         })
@@ -265,29 +275,30 @@ class TelegramOps:
         if not matches:
             raise ButtonNotFound(wanted, [b["text"] for b in buttons])
         target = matches[0]
-        bubble = page.locator(f'{sel.BUBBLE}[data-mid="{target["mid"]}"]')
+        bubble = page.locator(f'{sel.ACTIVE_CHAT} {sel.BUBBLE}[data-mid="{target["mid"]}"]')
         await bubble.locator(sel.INLINE_BUTTON).nth(buttons.index(target)).click()
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(tm.CALLBACK_SETTLE_S)
         msgs = await extract.read_messages(page, limit=5)
         return {"clicked": target["text"], "messages": [m.to_dict() for m in msgs]}
 
     async def click_reply_button(self, text: str) -> dict:
         page = await self._ready()
-        before_max = max((m.id for m in await extract.read_messages(page, limit=10)),
-                         default=0)
+        before_max = max((m.sort_id for m in await extract.read_messages(page, limit=10)),
+                         default=0.0)
         loop = asyncio.get_event_loop()
         labels: list[str] = []
         # Pressing a reply button sends its label as a message; verify the
         # outgoing bubble actually appeared and retry once if the click was
         # swallowed mid-render.
         for _attempt in range(2):
-            kb = page.locator(f"{sel.REPLY_KEYBOARD}:visible")
+            kb = page.locator(f"{sel.ACTIVE_CHAT} {sel.REPLY_KEYBOARD}:visible")
             if not await kb.count():
-                toggle = page.locator(sel.REPLY_KEYBOARD_TOGGLE)
+                toggle = page.locator(f"{sel.ACTIVE_CHAT} {sel.REPLY_KEYBOARD_TOGGLE}")
                 if await toggle.count():
                     await toggle.first.click()
-                    await asyncio.sleep(0.7)
-            buttons = page.locator(f"{sel.REPLY_KEYBOARD} {sel.REPLY_KEYBOARD_BUTTON}")
+                    await asyncio.sleep(tm.KEYBOARD_TOGGLE_S)
+            buttons = page.locator(
+                f"{sel.ACTIVE_CHAT} {sel.REPLY_KEYBOARD} {sel.REPLY_KEYBOARD_BUTTON}")
             labels = []
             for i in range(await buttons.count()):
                 labels.append((await buttons.nth(i).inner_text()).strip())
@@ -296,17 +307,16 @@ class TelegramOps:
             if target is None:
                 continue
             await buttons.nth(target).click()
-            deadline = loop.time() + 5
+            deadline = loop.time() + tm.REPLY_CLICK_CONFIRM_S
             while loop.time() < deadline:
                 msgs = await extract.read_messages(page, limit=5)
-                if any(m.out and m.id > before_max
+                if any(m.out and not m.sending and m.sort_id > before_max
                        and labels[target].lower() in m.text.lower() for m in msgs):
-                    # let the optimistic bubble settle to its server mid
-                    await asyncio.sleep(1.0)
+                    await asyncio.sleep(tm.MID_SETTLE_S)
                     msgs = await extract.read_messages(page, limit=5)
                     return {"clicked": labels[target],
                             "messages": [m.to_dict() for m in msgs]}
-                await asyncio.sleep(0.4)
+                await asyncio.sleep(tm.POLL_FAST_S)
         if labels and any(text.lower() in lbl.lower() for lbl in labels):
             raise SelectorBroken(f"reply button {text!r} click did not send a message")
         raise ButtonNotFound(text, labels)
@@ -316,41 +326,43 @@ class TelegramOps:
     async def send_file(self, path: str, caption: str | None = None,
                         kind: str = "auto") -> dict:
         page = await self._ready()
-        before = {m.id for m in await extract.read_messages(page, limit=10) if m.out}
+        before = {m.sort_id for m in await extract.read_messages(page, limit=10) if m.out}
         if kind == "auto":
             kind = "photo" if path.lower().rsplit(".", 1)[-1] in (
                 "png", "jpg", "jpeg", "gif", "webp", "mp4", "mov") else "document"
         # Feeding the hidden input directly skips WebK's willAttachType state,
         # so go through the attach menu and catch the native file chooser.
-        await page.locator(sel.ATTACH_BUTTON).last.click()
+        await page.locator(f"{sel.ACTIVE_CHAT} {sel.ATTACH_BUTTON}").last.click()
         pattern = re.compile("photo|video" if kind == "photo" else "document|file", re.I)
         item = page.locator(sel.MENU_ITEM, has_text=pattern).first
         try:
-            async with page.expect_file_chooser(timeout=10_000) as fc_info:
-                await item.click(timeout=5_000)
+            async with page.expect_file_chooser(timeout=tm.FILE_CHOOSER_TIMEOUT_MS) as fc_info:
+                await item.click(timeout=tm.MENU_ITEM_TIMEOUT_MS)
             chooser = await fc_info.value
             await chooser.set_files(path)
         except Exception:
             await page.keyboard.press("Escape")
             raise SelectorBroken("attach menu / file chooser")
         try:
-            await page.wait_for_selector(sel.ATTACH_POPUP, state="visible", timeout=10_000)
+            await page.wait_for_selector(sel.ATTACH_POPUP, state="visible",
+                                         timeout=tm.ATTACH_POPUP_TIMEOUT_MS)
         except Exception:
             raise SelectorBroken("attach confirmation popup")
         if caption:
             cap = page.locator(f"{sel.ATTACH_POPUP} {sel.MESSAGE_INPUT}:visible")
             if await cap.count():
                 await cap.first.click()
-                await page.keyboard.type(caption, delay=30)
+                await page.keyboard.insert_text(caption)
         await page.locator(sel.ATTACH_POPUP_SEND).click()
         loop = asyncio.get_event_loop()
-        deadline = loop.time() + 15
+        deadline = loop.time() + tm.UPLOAD_CONFIRM_TIMEOUT_S
         while loop.time() < deadline:
             msgs = await extract.read_messages(page, limit=10)
-            fresh = [m for m in msgs if m.out and m.id not in before]
+            fresh = [m for m in msgs if m.out and not m.sending
+                     and m.sort_id not in before]
             if fresh:
                 return fresh[-1].to_dict()
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(tm.POLL_S)
         raise SelectorBroken("uploaded message bubble")
 
     async def send_voice(self, path: str, duration_s: float | None = None) -> dict:
@@ -376,56 +388,57 @@ class TelegramOps:
             await self.session.start()  # relaunch with the fake-mic flags
             await self.open_chat(self._current_chat)
             page = self.session.page
-        before_max = max((m.id for m in await extract.read_messages(page, limit=10)),
-                         default=0)
-        record = page.locator(f"{sel.SEND_BUTTON}:visible").last
+        before_max = max((m.sort_id for m in await extract.read_messages(page, limit=10)),
+                         default=0.0)
+        record = page.locator(f"{sel.ACTIVE_CHAT} {sel.SEND_BUTTON}:visible").last
         if not await record.count():
             raise SelectorBroken("record (mic) button")
         await record.click()  # composer is empty -> starts recording
-        await asyncio.sleep(min(duration_s + 0.7, 55))
-        await page.locator(f"{sel.SEND_BUTTON}:visible").last.click()  # send
+        await asyncio.sleep(min(duration_s + tm.KEYBOARD_TOGGLE_S, tm.VOICE_MAX_RECORD_S))
+        await page.locator(f"{sel.ACTIVE_CHAT} {sel.SEND_BUTTON}:visible").last.click()  # send
         loop = asyncio.get_event_loop()
-        deadline = loop.time() + 15
+        deadline = loop.time() + tm.VOICE_CONFIRM_TIMEOUT_S
         while loop.time() < deadline:
             msgs = await extract.read_messages(page, limit=5)
-            mine = [m for m in msgs if m.out and m.id > before_max
-                    and m.media in ("voice", "audio")]
+            mine = [m for m in msgs if m.out and not m.sending
+                    and m.sort_id > before_max and m.media in ("voice", "audio")]
             if mine:
                 return mine[-1].to_dict()
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(tm.POLL_S)
         raise SelectorBroken("sent voice bubble (recording may have failed)")
 
     async def clear_chat(self) -> dict:
         # WebK's topbar menu offers "Delete" which opens PopupPeer with
         # clear/delete choices; for a 1:1 bot chat this wipes the history.
         page = await self._ready()
-        await page.locator(sel.TOPBAR_MENU_BUTTON).last.click()
-        # "delete" alone would match the "Auto-delete" menu item first.
+        await page.locator(f"{sel.ACTIVE_CHAT} {sel.TOPBAR_MENU_BUTTON}").last.click()
+        # Matches the English label OR the locale-independent icon glyph;
+        # plain "delete" would hit the "Auto-delete" item first.
         item = page.locator(sel.MENU_ITEM,
-                            has_text=re.compile("delete chat|clear history", re.I))
+                            has_text=re.compile(sel.TEXT_DELETE_MENU, re.I))
         try:
-            await item.first.click(timeout=5_000)
+            await item.first.click(timeout=tm.MENU_ITEM_TIMEOUT_MS)
         except Exception:
             await page.keyboard.press("Escape")
             raise SelectorBroken("'Delete Chat'/'Clear history' menu item")
         confirm = page.locator(f".popup:visible {sel.POPUP_DANGER_BUTTON}")
         try:
-            await confirm.first.click(timeout=5_000)
+            await confirm.first.click(timeout=tm.MENU_ITEM_TIMEOUT_MS)
         except Exception:
             await page.keyboard.press("Escape")
             raise SelectorBroken("delete/clear confirmation button")
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(tm.MENU_OPEN_S)
         return {"status": "cleared"}
 
     async def screenshot(self, scope: str = "chat", message_id: int | None = None) -> bytes:
         page = await self._ready()
         if scope == "message" and message_id is not None:
-            loc = page.locator(f'{sel.BUBBLE}[data-mid="{message_id}"]')
+            loc = page.locator(f'{sel.ACTIVE_CHAT} {sel.BUBBLE}[data-mid="{message_id}"]')
             if await loc.count():
                 return await loc.screenshot()
             raise SelectorBroken(f"message bubble {message_id}")
         if scope == "chat":
-            loc = page.locator(sel.CHAT_CONTAINER)
+            loc = page.locator(f"{sel.ACTIVE_CHAT} {sel.CHAT_CONTAINER}")
             if await loc.count():
                 return await loc.screenshot()
         return await page.screenshot()

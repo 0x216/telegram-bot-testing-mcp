@@ -41,6 +41,9 @@ MESSAGES_JS = """
       mid: Number(b.dataset.mid || 0),
       out: b.classList.contains('is-out'),
       service: b.classList.contains('service'),
+      // pending messages carry fractional mids (e.g. 208.0001) and is-sending
+      sending: b.classList.contains('is-sending') || b.classList.contains('is-outgoing'),
+      failed: b.classList.contains('is-error'),
       text,
       time: timeEl ? (timeEl.getAttribute('title') || timeEl.innerText || '').trim() : null,
       buttons: rows,
@@ -60,31 +63,43 @@ class Message:
     time: str | None
     buttons: list[list[str]]
     media: str | None
+    sending: bool = False
+    failed: bool = False  # named 'failed', not 'error': tool payloads reserve
+                          # the 'error' key for adapter errors
+    # fractional ordering key: pending bubbles have mids like 208.0001
+    sort_id: float = 0.0
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        d.pop("sort_id")
+        return d
 
 
 def shape_messages(raw: list[dict]) -> list[Message]:
-    return [
-        Message(
-            id=int(r.get("mid") or 0),
+    out = []
+    for r in raw:
+        mid = float(r.get("mid") or 0)
+        # mid 0 = placeholder bubbles ("No messages here yet"), not messages
+        if mid <= 0:
+            continue
+        out.append(Message(
+            id=int(mid),
             out=bool(r.get("out")),
             service=bool(r.get("service")),
             text=r.get("text") or "",
             time=r.get("time"),
             buttons=[[str(t) for t in row] for row in (r.get("buttons") or [])],
             media=r.get("media"),
-        )
-        for r in raw
-        # mid 0 = placeholder bubbles ("No messages here yet"), not messages
-        if int(r.get("mid") or 0) > 0
-    ]
+            sending=bool(r.get("sending")),
+            failed=bool(r.get("failed")),
+            sort_id=mid,
+        ))
+    return out
 
 
 def _js_args(limit: int) -> dict:
     return {
-        "bubbleSel": sel.BUBBLE,
+        "bubbleSel": f"{sel.ACTIVE_CHAT} {sel.BUBBLE}",
         "textSel": sel.BUBBLE_TEXT,
         "timeSel": sel.BUBBLE_TIME,
         "rowSel": sel.INLINE_ROW,

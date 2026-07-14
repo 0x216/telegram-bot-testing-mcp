@@ -87,6 +87,7 @@ state, `selector_broken` when Telegram changes markup).
 | `TG_MCP_MODE` | `prod` | `prod` or `test` (Telegram test DC, adds `?test=1`) |
 | `TG_MCP_HEADED` | off | `1` = show the browser window during operations |
 | `TG_MCP_PROFILE_DIR` | `~/.telegram-user-mcp/profile-<mode>` | Browser profile location |
+| `TG_MCP_TIMEOUT_SCALE` | `1` | Multiply all network-bound timeouts (e.g. `2` on slow networks / the congested test DC) |
 
 ## Security
 
