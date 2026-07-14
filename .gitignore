@@ -8,3 +8,4 @@ profile-*/
 .playwright/
 spike/out/
 e2e/out/
+spike/

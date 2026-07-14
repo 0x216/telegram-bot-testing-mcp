@@ -4,6 +4,7 @@ import asyncio
 import re
 
 from . import extract
+from . import js
 from . import selectors as sel
 from . import timings as tm
 from .errors import (
@@ -36,42 +37,6 @@ class TelegramOps:
         await self.session.ensure_started()
         await self.session.ensure_logged_in()
         return self.session.page
-
-    # The search dropdown has two states: the quick view labels a bot row with
-    # subtitle "bot" (no username shown), while the fully-resolved list shows
-    # "@username" subtitles. Row innerText concatenates fields with no
-    # separator, so match individual descendants' textContent. Prefer the
-    # exact-@username hit; fall back to title==username + subtitle=="bot".
-    # In title mode (query with spaces — service chats like "Telegram
-    # Notifications") match the exact .peer-title instead.
-    _FIND_ROW_JS = """
-    (args) => {
-      const rows = Array.from(document.querySelectorAll(args.rowSel));
-      const uname = args.username.toLowerCase();
-      if (args.byTitle) {
-        for (let i = 0; i < rows.length; i++) {
-          const title = rows[i].querySelector('.peer-title');
-          if (title && (title.textContent || '').trim().toLowerCase() === uname) return i;
-        }
-        return -1;
-      }
-      const want = '@' + uname;
-      for (let i = 0; i < rows.length; i++) {
-        for (const el of rows[i].querySelectorAll('*')) {
-          const t = (el.textContent || '').trim().toLowerCase();
-          if (t === want || t.startsWith(want + ',')) return i;
-        }
-      }
-      for (let i = 0; i < rows.length; i++) {
-        const sub = rows[i].querySelector('.row-subtitle');
-        const title = rows[i].querySelector('.peer-title');
-        if (sub && title
-            && (sub.textContent || '').trim().toLowerCase() === 'bot'
-            && (title.textContent || '').trim().toLowerCase() === uname) return i;
-      }
-      return -1;
-    }
-    """
 
     async def _type_into_search(self, page, text: str) -> bool:
         search = page.locator(sel.SEARCH_INPUT).first
@@ -107,7 +72,7 @@ class TelegramOps:
                 continue
             deadline = loop.time() + tm.SEARCH_ROUND_TIMEOUT_S
             while loop.time() < deadline:
-                idx = await page.evaluate(self._FIND_ROW_JS, {
+                idx = await page.evaluate(js.FIND_SEARCH_ROW, {
                     "rowSel": sel.SEARCH_RESULT_ROW, "username": username,
                     "byTitle": by_title,
                 })
@@ -160,24 +125,9 @@ class TelegramOps:
             mine = [m for m in msgs if m.out and m.sort_id > before_max]
             if mine:
                 return mine[-1].to_dict()
-        # Several .input-message-input nodes coexist (the active one carries
-        # data-peer-id and sits on top); focus it via JS instead of clicking
-        # through overlapping editors.
-        _FOCUS_JS = """(q) => {
-          const els = Array.from(document.querySelectorAll(q)).filter(e => e.offsetParent);
-          const el = els.find(e => e.dataset.peerId) || els[els.length - 1];
-          if (!el) return null;
-          el.focus();
-          return el.textContent || '';
-        }"""
-        _READ_JS = """(q) => {
-          const els = Array.from(document.querySelectorAll(q)).filter(e => e.offsetParent);
-          const el = els.find(e => e.dataset.peerId) || els[els.length - 1];
-          return el ? (el.textContent || '') : null;
-        }"""
+        composer = f"{sel.ACTIVE_CHAT} {sel.MESSAGE_INPUT}"
         for _attempt in range(3):
-            current = await page.evaluate(_FOCUS_JS,
-                                          f"{sel.ACTIVE_CHAT} {sel.MESSAGE_INPUT}")
+            current = await page.evaluate(js.COMPOSER, {"sel": composer, "focus": True})
             if current is None:
                 raise SelectorBroken("message input (is a chat open?)")
             if current.strip():
@@ -187,7 +137,7 @@ class TelegramOps:
             # silently dropped by synthesized keydown events
             await page.keyboard.insert_text(text)
             await asyncio.sleep(tm.UI_SETTLE_S)
-            typed = await page.evaluate(_READ_JS, f"{sel.ACTIVE_CHAT} {sel.MESSAGE_INPUT}")
+            typed = await page.evaluate(js.COMPOSER, {"sel": composer, "focus": False})
             if typed is not None and typed.strip() == text.strip():
                 break
         else:
@@ -233,32 +183,10 @@ class TelegramOps:
 
     # -- buttons ---------------------------------------------------------
 
-    _BUTTONS_JS = """
-    (args) => {
-      let bubble = null;
-      if (args.mid) bubble = document.querySelector(`${args.bubbleSel}[data-mid="${args.mid}"]`);
-      else {
-        const all = Array.from(document.querySelectorAll(args.bubbleSel))
-                         .filter(b => b.querySelector(args.btnSel));
-        bubble = all[all.length - 1] || null;
-      }
-      if (!bubble) return [];
-      const out = [];
-      Array.from(bubble.querySelectorAll(args.rowSel)).forEach((row, ri) => {
-        Array.from(row.querySelectorAll(args.btnSel)).forEach((btn, ci) => {
-          const t = btn.querySelector(args.btnTextSel);
-          out.push({row: ri, col: ci, text: ((t ? t.innerText : btn.innerText) || '').trim(),
-                    mid: Number(bubble.dataset.mid || 0)});
-        });
-      });
-      return out;
-    }
-    """
-
     async def click_button(self, text: str | None = None, row: int | None = None,
                            col: int | None = None, message_id: int | None = None) -> dict:
         page = await self._ready()
-        buttons = await page.evaluate(self._BUTTONS_JS, {
+        buttons = await page.evaluate(js.INLINE_BUTTONS, {
             "mid": message_id, "bubbleSel": f"{sel.ACTIVE_CHAT} {sel.BUBBLE}",
             "rowSel": sel.INLINE_ROW, "btnSel": sel.INLINE_BUTTON,
             "btnTextSel": sel.INLINE_BUTTON_TEXT,

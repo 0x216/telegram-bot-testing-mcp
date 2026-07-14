@@ -3,30 +3,11 @@ from __future__ import annotations
 import asyncio
 import re
 
+from . import js
 from . import selectors as sel
 from . import timings as tm
 from .errors import MiniAppNotOpen, SelectorBroken
 from .session import BrowserSession
-
-SNAPSHOT_JS = """
-(max) => {
-  let n = 0;
-  const lines = [];
-  const interesting = document.querySelectorAll(
-    'a, button, input, textarea, select, [role], [onclick], h1, h2, h3, label, [id], [data-tgmcp-ref]');
-  for (const el of interesting) {
-    if (n >= max) break;
-    const r = el.getBoundingClientRect();
-    if (r.width < 2 || r.height < 2) continue;
-    const ref = 'e' + (++n);
-    el.setAttribute('data-tgmcp-ref', ref);
-    const role = el.getAttribute('role') || el.tagName.toLowerCase();
-    const text = (el.innerText || el.value || el.placeholder || '').trim().slice(0, 80);
-    lines.push(`[${ref}] ${role} "${text}"`);
-  }
-  return lines.join('\\n');
-}
-"""
 
 
 class MiniAppOps:
@@ -83,7 +64,7 @@ class MiniAppOps:
 
     async def snapshot(self, max_elements: int = 150) -> str:
         frame = await self._frame()
-        return await frame.evaluate(SNAPSHOT_JS, max_elements)
+        return await frame.evaluate(js.MINIAPP_SNAPSHOT, max_elements)
 
     async def click(self, ref: str) -> dict:
         frame = await self._frame()
