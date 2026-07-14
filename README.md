@@ -143,9 +143,102 @@ Reality check as of 2026:
 
 For most workflows the default `prod` mode with a dedicated account is simpler.
 
-## Limitations (v1)
+## Coverage map
 
-- Designed for 1:1 bot chats; groups/channels are untested.
+The single source of truth for what this adapter can and cannot test.
+Statuses are earned, not promised:
+
+- ✅ implemented **and** verified by a live e2e run against real Telegram
+- 🟡 implemented, no dedicated e2e yet (should work; treat with care)
+- 🔴 not implemented (PRs / issues welcome; priorities below)
+- ⚪ impossible in the official Telegram **Web** client itself — a human
+  web user can't do it either, so a web-based tester can't and shouldn't
+
+### Reading what the bot sends
+
+| Component | Status | Notes |
+|---|---|---|
+| Text, emoji, line breaks | ✅ | emoji restored from `<img alt>`, `<br>` preserved |
+| Formatting entities (bold/links/code/spoilers) | 🟡 | extracted as plain text; markup structure not exposed |
+| Photo | ✅ | `media: "photo"` |
+| Video | 🟡 | `media: "video"` |
+| GIF / animation | 🟡 | likely detected as `video`; unverified |
+| Video note (round) | 🟡 | `media: "round_video"` |
+| Voice | ✅ | `media: "voice"` |
+| Audio file | 🟡 | `media: "audio"` |
+| Document | 🟡 | `media: "document"` (sending verified, receiving not) |
+| Sticker (static/animated/video) | 🟡 | `media: "sticker"` |
+| Album / media group | 🟡 | read as one message; items not split out |
+| Message edit by bot | ✅ | verified via re-read after callback |
+| Message deletion by bot | 🟡 | disappears from `tg_read_messages`; no explicit event |
+| Location / venue | 🔴 | renders in chat; not detected in `media` |
+| Live location | 🔴 | |
+| Contact | 🔴 | |
+| Poll / quiz | 🔴 | options and vote counts not extracted |
+| Dice / darts / slots | 🔴 | |
+| Invoice (payments) | 🔴 | Pay button is enumerable; checkout flow unsupported |
+| Forward header ("Forwarded from") | 🔴 | not exposed in message JSON |
+| Reply-to attribution | 🔴 | not exposed in message JSON |
+| Sender attribution | 🔴 | trivial in 1:1 chats; matters for groups |
+| Reactions set by the bot | 🔴 | |
+| Link preview / web page card | 🔴 | text extracted, preview card not flagged |
+| Service messages | ✅ | flagged `service: true` |
+
+### Buttons & keyboards
+
+| Component | Status | Notes |
+|---|---|---|
+| Inline callback buttons (grid, click, edit-after-callback) | ✅ | |
+| Reply keyboard (show, click, toggle) | ✅ | |
+| `web_app` buttons → Mini App | ✅ | see Mini Apps below |
+| URL buttons | 🟡 | enumerated with text; clicking (opens a new tab) undefined |
+| `login_url`, `switch_inline_query`, request_contact/location/users buttons | 🔴 | enumerable as text only |
+| Keyboard remove / one-time / force_reply | 🟡 | not explicitly tracked |
+| Bot commands menu (/) and menu button | 🔴 | |
+
+### Acting as the user
+
+| Action | Status | Notes |
+|---|---|---|
+| Send text / commands / emoji | ✅ | delivery-verified (not just typed) |
+| Send photo / document (+caption) | ✅ | `kind: auto\|photo\|document` |
+| Record & send voice | ✅ | fake microphone fed from WAV |
+| Press START on a new bot | ✅ | automatic |
+| Clear chat history (test isolation) | ✅ | |
+| Screenshots (chat / message / window) | ✅ | |
+| Send video note (webcam round) | 🔴 | possible via fake video device; not implemented |
+| Send sticker / GIF (pickers) | 🔴 | |
+| Create a poll | 🔴 | web client supports it; not implemented |
+| Forward a message | 🔴 | |
+| Reply to a specific message | 🔴 | |
+| Edit / delete own message | 🔴 | |
+| Set a reaction | 🔴 | |
+| Inline mode (`@bot query` + result picker) | 🔴 | biggest gap for inline bots |
+| `/start` deep link with payload (`?start=...`) | 🔴 | |
+| Block / restart bot, profile actions | 🔴 | |
+| Send location / live location | ⚪ | the official web client cannot |
+| Calls, secret chats | ⚪ | not available on web / not applicable to bots |
+| Stories | ⚪ | bots don't interact with stories |
+
+### Sessions & flows
+
+| Flow | Status | Notes |
+|---|---|---|
+| QR login (desktop window) | ✅ | manual scan once |
+| Headless phone login (terminal / MCP tools) | ✅ | autonomous e2e: second session reads the code |
+| 2FA password step | 🟡 | implemented; test account has no 2FA to verify against |
+| Profile transfer to servers | ✅ | verified Windows → Linux |
+| Mini App: open / snapshot / click / type / read state / screenshot / close | ✅ | |
+| Mini App main button / back button | 🟡 | selectors present, no e2e |
+| Payment checkout (test provider) | 🔴 | feasible on the test DC |
+| Groups / channels / topics | 🔴 | designed for 1:1 bot chats so far |
+
+Roadmap order for the 🔴s: (1) extraction attributes — forward/reply/sender,
+location/poll/contact/dice detection; (2) reply & forward tools; (3) inline
+mode; (4) payment checkout on the test DC; (5) sticker/GIF pickers.
+
+## Limitations
+
 - One server instance per profile (Chromium locks the profile directory).
 - Telegram Web markup changes can break selectors — they live in one file
   (`selectors.py`), and every breakage surfaces as a typed `selector_broken`
