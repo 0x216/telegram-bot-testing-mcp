@@ -57,19 +57,30 @@ REPLY_KEYBOARD = ".reply-keyboard"           # [src] replyKeyboard.tsx:21
 REPLY_KEYBOARD_BUTTON = ".reply-keyboard-button"  # [src] replyKeyboard.tsx:134
 REPLY_KEYBOARD_TOGGLE = ".toggle-reply-markup, .btn-icon.toggle-reply-markup"  # [e2e]
 
-# media kind detection: bubble-level classes checked via classList [src] bubbles.ts
-MEDIA_BUBBLE_CLASSES = [
-    ["sticker", "sticker"],                  # [src] bubbles.ts:6057
-    ["round", "round_video"],                # [src] bubbles.ts:7952
-    ["video", "video"],                      # [src] bubbles.ts:8385
-    ["photo", "photo"],                      # [src] bubbles.ts:7744
+# media kind detection, ORDERED: entries are [how, key, kind] where how is
+# "class" (bubble classList) or "inner" (querySelector). Geo must precede the
+# "photo" class — locations render as photo bubbles with a map thumbnail.
+# Dice renders as a plain animated sticker (no distinct marker). [live 2026-07]
+MEDIA_DETECTORS = [
+    ["class", "contact-message", "contact"],
+    ["class", "poll-message", "poll"],
+    ["inner", ".geo-footer", "venue"],
+    ["inner", ".geo-container", "location"],
+    ["class", "sticker", "sticker"],
+    ["class", "round", "round_video"],
+    ["class", "video", "video"],             # GIF/animation also lands here
+    ["class", "photo", "photo"],
+    ["inner", ".audio.is-voice", "voice"],
+    ["inner", ".audio", "audio"],
+    ["inner", ".document", "document"],
 ]
-# inner containers checked via querySelector, first match wins
-MEDIA_KIND_SELECTORS = [
-    [".audio.is-voice", "voice"],            # [e2e] refined from [src] .audio
-    [".audio", "audio"],                     # [src] bubbles.ts:8479
-    [".document", "document"],               # [src] bubbles.ts:8479
-]
+
+# message sub-structures [live 2026-07]
+REPLY_TITLE = ".reply .reply-title .peer-title"   # who is being replied to
+REPLY_QUOTE = ".reply .reply-subtitle"            # quoted text
+NAME_TITLE = ".name .peer-title"                  # forward origin / group sender
+POLL_CONTENT = ".poll-message-content"
+POLL_TEXTS = ".translatable-message"              # first = question, rest = options
 
 # --- composing / sending ----------------------------------------------------------
 MESSAGE_INPUT = ".input-message-input"       # [src] input.ts:2913, contenteditable

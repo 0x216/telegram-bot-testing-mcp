@@ -80,12 +80,51 @@ REPLY_KB = {"keyboard": [[{"text": "Red"}, {"text": "Green"}]],
             "resize_keyboard": True}
 
 
+TINY_GIF = (b"GIF89a\x02\x00\x02\x00\x80\x00\x00\xff\x00\x00\x00\x00\xff!"
+            b"\xf9\x04\x00\x00\x00\x00\x00,\x00\x00\x00\x00\x02\x00\x02\x00"
+            b"\x00\x02\x03\x44\x02\x05\x00;")
+
+
 def handle_message(msg: dict):
     chat_id = msg["chat"]["id"]
     text = (msg.get("text") or "").strip()
+    reply_to = msg.get("reply_to_message")
+    fwd = msg.get("forward_origin")
+    if fwd:
+        call("sendMessage", chat_id=chat_id,
+             text=f"got forward (origin: {fwd.get('type')})")
+        return
+    if reply_to and text:
+        call("sendMessage", chat_id=chat_id,
+             text=f"echo(reply to {reply_to['message_id']}): {text}")
+        return
     if text == "/start":
         call("sendMessage", chat_id=chat_id,
              text="fixture bot ready. Press a button:", reply_markup=INLINE_KB)
+    elif text == "/reply":
+        sent = call("sendMessage", chat_id=chat_id, text="reply target")
+        call("sendMessage", chat_id=chat_id, text="this replies to the target",
+             reply_parameters={"message_id": sent["message_id"]})
+    elif text == "/forwarded":
+        sent = call("sendMessage", chat_id=chat_id, text="forward source")
+        call("forwardMessage", chat_id=chat_id, from_chat_id=chat_id,
+             message_id=sent["message_id"])
+    elif text == "/location":
+        call("sendLocation", chat_id=chat_id, latitude=48.8584, longitude=2.2945)
+    elif text == "/venue":
+        call("sendVenue", chat_id=chat_id, latitude=48.8584, longitude=2.2945,
+             title="Eiffel Tower", address="Champ de Mars, Paris")
+    elif text == "/contact":
+        call("sendContact", chat_id=chat_id, phone_number="+15551234567",
+             first_name="Fixture", last_name="Contact")
+    elif text == "/poll":
+        call("sendPoll", chat_id=chat_id, question="favorite color?",
+             options=[{"text": "Red"}, {"text": "Green"}, {"text": "Blue"}])
+    elif text == "/dice":
+        call("sendDice", chat_id=chat_id)
+    elif text == "/gif":
+        call("sendAnimation", chat_id=chat_id, caption="a tiny gif",
+             files={"animation": ("tiny.gif", TINY_GIF, "image/gif")})
     elif text == "/kb":
         call("sendMessage", chat_id=chat_id, text="pick a color", reply_markup=REPLY_KB)
     elif text == "/hide":

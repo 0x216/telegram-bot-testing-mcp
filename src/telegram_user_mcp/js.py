@@ -18,9 +18,8 @@ MESSAGES = """
         .map(x => (x.querySelector(args.btnTextSel)?.innerText ?? x.innerText ?? '').trim());
       if (btns.length) rows.push(btns);
     }
-    let media = args.mediaBubbleClasses.find(([cls]) => b.classList.contains(cls))?.[1]
-             ?? args.mediaInnerSelectors.find(([q]) => b.querySelector(q))?.[1]
-             ?? null;
+    const media = args.mediaDetectors.find(([how, key]) =>
+      how === 'class' ? b.classList.contains(key) : b.querySelector(key))?.[2] ?? null;
     let text = '';
     const textEl = b.querySelector(args.textSel);
     if (textEl) {
@@ -29,6 +28,16 @@ MESSAGES = """
       clone.querySelectorAll('br').forEach(t => t.replaceWith('\\n'));
       clone.querySelectorAll('img[alt]').forEach(i => i.replaceWith(i.getAttribute('alt')));
       text = (clone.textContent ?? '').trim();
+    }
+    const txt = el => (el?.textContent ?? '').trim() || null;
+    const replyTitle = txt(b.querySelector(args.replyTitleSel));
+    const nameTitle = txt(b.querySelector(args.nameTitleSel));
+    let poll = null;
+    const pollEl = media === 'poll' ? b.querySelector(args.pollContentSel) : null;
+    if (pollEl) {
+      const texts = Array.from(pollEl.querySelectorAll(args.pollTextsSel))
+        .map(e => (e.textContent ?? '').trim());
+      poll = {question: texts[0] ?? '', options: texts.slice(1)};
     }
     return {
       mid: Number(b.dataset.mid ?? 0),
@@ -40,6 +49,10 @@ MESSAGES = """
       time: (timeEl?.getAttribute('title') ?? timeEl?.innerText ?? null)?.trim() ?? null,
       buttons: rows,
       media,
+      reply_to: replyTitle ? {title: replyTitle, quote: txt(b.querySelector(args.replyQuoteSel))} : null,
+      forwarded_from: b.classList.contains('forwarded') ? nameTitle : null,
+      sender: !b.classList.contains('forwarded') ? nameTitle : null,
+      poll,
     };
   });
 }

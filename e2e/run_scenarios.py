@@ -134,6 +134,66 @@ async def main() -> None:
             check("photo detected", ok, json.dumps(fresh)[:300])
             last = max(last, max_id(fresh))
 
+            print("== rich content from bot")
+
+            async def command_reply(cmd, timeout=30):
+                nonlocal last
+                sent = parse(await s.call_tool("tg_send_message", {"text": cmd}))
+                last = max(last, max_id(sent))
+                fresh = parse(await s.call_tool("tg_wait_for_message",
+                                                {"timeout_s": timeout, "after_id": last}))
+                if isinstance(fresh, list):
+                    last = max(last, max_id(fresh))
+                    return fresh
+                return []
+
+            fresh = await command_reply("/reply")
+            if not any(m.get("reply_to") for m in fresh):
+                extra = parse(await s.call_tool("tg_wait_for_message",
+                                                {"timeout_s": 15, "after_id": last}))
+                if isinstance(extra, list):
+                    fresh += extra
+                    last = max(last, max_id(extra))
+            replied = next((m for m in fresh if m.get("reply_to")), None)
+            check("reply attribution extracted",
+                  bool(replied) and replied["reply_to"].get("quote") == "reply target",
+                  json.dumps(fresh)[:250])
+
+            fresh = await command_reply("/forwarded")
+            fwd = next((m for m in fresh if m.get("forwarded_from")), None)
+            check("forward header extracted",
+                  bool(fwd) and "Fixture" in fwd["forwarded_from"],
+                  json.dumps(fresh)[:250])
+
+            fresh = await command_reply("/location")
+            check("location detected",
+                  any(m.get("media") == "location" for m in fresh),
+                  json.dumps(fresh)[:250])
+
+            fresh = await command_reply("/venue")
+            venue = next((m for m in fresh if m.get("media") == "venue"), None)
+            check("venue detected with title",
+                  bool(venue) and "Eiffel Tower" in venue.get("text", ""),
+                  json.dumps(fresh)[:250])
+
+            fresh = await command_reply("/contact")
+            contact = next((m for m in fresh if m.get("media") == "contact"), None)
+            check("contact detected with name",
+                  bool(contact) and "Fixture Contact" in contact.get("text", ""),
+                  json.dumps(fresh)[:250])
+
+            fresh = await command_reply("/poll")
+            poll = next((m for m in fresh if m.get("media") == "poll"), None)
+            check("poll question and options extracted",
+                  bool(poll) and poll.get("poll", {}).get("question") == "favorite color?"
+                  and poll["poll"].get("options") == ["Red", "Green", "Blue"],
+                  json.dumps(fresh)[:300])
+
+            fresh = await command_reply("/gif")
+            check("gif/animation detected (as video)",
+                  any(m.get("media") == "video" for m in fresh),
+                  json.dumps(fresh)[:250])
+
             print("== send file to bot")
             tiny = OUT / "upload.png"
             if not tiny.exists():
